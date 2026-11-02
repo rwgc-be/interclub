@@ -7,6 +7,9 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Interclub">
 <title>Interclub</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-180.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap">
 <style>
@@ -101,7 +104,7 @@ nav.bot button.on{background:var(--gl);color:var(--gd);font-weight:800}
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail, signOut, updateProfile } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getFirestore, collection, doc, onSnapshot, addDoc, updateDoc, deleteDoc, setDoc, query, where, deleteField, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, collection, doc, onSnapshot, addDoc, updateDoc, deleteDoc, setDoc, query, where, deleteField, arrayUnion, arrayRemove, runTransaction, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 /* ===================== CONFIGURATION ===================== */
 // Coller ici la configuration du projet Firebase (Console Firebase > Paramètres du projet > Vos applications > Config)
@@ -115,7 +118,7 @@ const firebaseConfig = {
 };
 // Administrateurs (création des équipes et des capitaines). Même liste que dans firestore.rules.
 const ADMINS = ["francisberlier@gmail.com"];
-const VERSION = "v1.5";
+const VERSION = "v1.9";
 /* ========================================================= */
 
 const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -176,6 +179,10 @@ const half = x => { const w = Math.floor(x); return x % 1 ? (w ? String(w) : '')
 const pct = (a, b) => b ? Math.round(100 * a / b) + ' %' : '—';
 const avg = a => a.reduce((x, y) => x + y, 0) / a.length;
 const has = v => v !== undefined && v !== null && v !== '';
+const yesCount = e => Object.values(e.r || {}).filter(v => v === 'yes').length;
+const isFull = e => !!e.max && yesCount(e) >= e.max;
+const groupOf = e => e.group ? S.events.filter(x => x.group === e.group).sort((a, b) => ((a.date || '') + (a.time || '')).localeCompare((b.date || '') + (b.time || ''))) : [];
+const slotLabel = e => shortDate(e.date) + (e.time ? ' · ' + e.time : '');
 function typeText(e) {
   if (e.type === 'matchplay') return 'Match play ' + (e.format === 'foursome' ? 'foursome' : 'simple') + ' · ' + (e.holes || 18) + ' trous';
   if (isCourse(e.type)) return typeOf(e.type).l + ' · Stableford';
@@ -190,8 +197,46 @@ function rankRows(list, better) {
 
 /* ---------- Firebase ---------- */
 const configured = !!firebaseConfig.apiKey;
-let auth, db;
-if (configured) { const app = initializeApp(firebaseConfig); auth = getAuth(app); db = getFirestore(app); }
+let auth, db, auth2;
+if (configured) { const app = initializeApp(firebaseConfig); auth = getAuth(app); db = getFirestore(app); auth2 = getAuth(initializeApp(firebaseConfig, 'creator')); }
+const APP_URL = 'https://rwgc-be.github.io/interclub/';
+function genPwd() {
+  const U_ = 'ABCDEFGHJKLMNPQRSTUVWXYZ', L_ = 'abcdefghijkmnpqrstuvwxyz', D_ = '23456789', X_ = '!?#*@%+';
+  const rnd = n => { const a = new Uint32Array(1); crypto.getRandomValues(a); return a[0] % n; };
+  const pick = set => set[rnd(set.length)];
+  const chars = [pick(U_), pick(U_), pick(X_), pick(D_), pick(D_)];
+  while (chars.length < 10) chars.push(pick(L_));
+  for (let i = chars.length - 1; i > 0; i--) { const j = rnd(i + 1); [chars[i], chars[j]] = [chars[j], chars[i]]; }
+  return chars.join('');
+}
+// Crée le compte Firebase d'un joueur sans déconnecter le capitaine (instance secondaire)
+async function createAccount(email, name, pwd) {
+  try {
+    const c = await createUserWithEmailAndPassword(auth2, email, pwd);
+    await updateProfile(c.user, { displayName: name });
+    await signOut(auth2);
+    return 'created';
+  } catch (e) { if (e.code === 'auth/email-already-in-use') return 'exists'; throw e; }
+}
+function accessMsg(name, email, pwd, teamTitle) {
+  const first = String(name).split(' ')[0];
+  const title = teamTitle || (S.team ? (S.team.title || ('Interclub ' + S.team.name)) : 'Interclub');
+  const from = (S.user && S.user.displayName) || '';
+  return {
+    subject: 'Ton accès à l’app ' + title,
+    body: `Bonjour ${first},\n\nTu as été ajouté à l’équipe « ${title} » dans l’application Interclub (agenda, présences, résultats et statistiques).\n\nAdresse : ${APP_URL}\nIdentifiant : ${email}\nMot de passe : ${pwd}\n\nAstuce : sur ton GSM, ouvre l’adresse puis « Ajouter à l’écran d’accueil ».\n\nÀ bientôt sur le parcours,\n${from}`
+  };
+}
+function sendButtons(name, email, pwd, phone, teamTitle) {
+  const m = accessMsg(name, email, pwd, teamTitle);
+  const cv = [email, pwd, name, teamTitle || ''].map(esc).join('|');
+  const gmail = 'https://mail.google.com/mail/?view=cm&fs=1&to=' + encodeURIComponent(email) + '&su=' + encodeURIComponent(m.subject) + '&body=' + encodeURIComponent(m.body);
+  const mailto = 'mailto:' + encodeURIComponent(email) + '?subject=' + encodeURIComponent(m.subject) + '&body=' + encodeURIComponent(m.body);
+  const a = (href, label, primary) => `<a class="btn ${primary ? 'primary' : ''}" style="display:flex;align-items:center;justify-content:center;text-decoration:none;font-size:14px" href="${esc(href)}" target="_blank" rel="noopener">${label}</a>`;
+  const copy = `<button class="btn" style="font-size:14px" data-a="copyAccess" data-v="${cv}">Copier le message</button>`;
+  if (phone) return `${a(waHref(phone) + '?text=' + encodeURIComponent(m.body), 'Envoyer par WhatsApp', true)}<div class="row2">${a(gmail, 'Par Gmail')}${copy}</div>`;
+  return `<div class="row2">${a(gmail, 'Envoyer par Gmail', true)}${a(mailto, 'Autre messagerie')}</div>${copy}<div class="small">Ajoute son n° de GSM pour pouvoir envoyer par WhatsApp.</div>`;
+}
 
 /* ---------- state ---------- */
 const S = {
@@ -285,10 +330,12 @@ function subscribeContacts() {
   }
 }
 const phoneOf = k => (S.contacts[k] && S.contacts[k].phone) || '';
+const pwdOf = k => (S.contacts[k] && S.contacts[k].pwd) || '';
 const telHref = ph => 'tel:' + String(ph).replace(/[^\d+]/g, '');
 const waHref = ph => { let d = String(ph).replace(/[^\d+]/g, ''); if (d.startsWith('+')) d = d.slice(1); else if (d.startsWith('00')) d = d.slice(2); else if (d.startsWith('0')) d = '32' + d.slice(1); return 'https://wa.me/' + d; };
 const okPhone = ph => !ph || /^[+0-9][0-9 ./()-]{7,}$/.test(String(ph).trim());
-function setPhone(k, ph) { return setDoc(doc(db, 'teams', S.teamId, 'contacts', k), { phone: String(ph || '').trim() }); }
+function setPhone(k, ph, tid) { return setDoc(doc(db, 'teams', tid || S.teamId, 'contacts', k), { phone: String(ph || '').trim() }, { merge: true }); }
+function setContact(k, data, tid) { return setDoc(doc(db, 'teams', tid || S.teamId, 'contacts', k), data, { merge: true }); }
 
 /* ---------- stats ---------- */
 function computeStats() {
@@ -336,6 +383,30 @@ function computeStats() {
   return S2;
 }
 
+/* ---------- installation (PWA) ---------- */
+let installEvt = null;
+const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const lsGet = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(e => console.warn('SW', e));
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; softRender(); });
+window.addEventListener('appinstalled', () => { installEvt = null; toast('App installée sur ton écran d’accueil'); });
+function vInstall() {
+  if (isStandalone()) return '';
+  const snooze = Number(lsGet('ic_install_snooze') || 0);
+  if (snooze > Date.now()) return '';
+  const later = `<button class="link" style="padding:4px 0" data-a="installLater">Plus tard</button>`;
+  if (installEvt) return `<div class="card" style="gap:10px;border:2px solid var(--g)"><div class="t14" style="font-weight:800">Installer l’app sur ce téléphone</div>
+    <div class="small">Une icône sur ton écran d’accueil, comme une vraie application.</div>
+    <div class="flex" style="align-items:center"><button class="btn primary" data-a="installNow">Installer</button>${later}</div></div>`;
+  if (isIOS()) return `<div class="card" style="gap:8px;border:2px solid var(--g)"><div class="t14" style="font-weight:800">Ajoute l’app à ton écran d’accueil</div>
+    <div class="small">1. Touche le bouton <b>Partager</b> <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-label="Partager" role="img" style="vertical-align:-2px"><path d="M12 3v12M7 8l5-5 5 5"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg> de Safari (en bas ou en haut de l’écran)</div>
+    <div class="small">2. Choisis <b>« Sur l’écran d’accueil »</b>, puis <b>Ajouter</b></div>
+    <div class="small">3. Ouvre ensuite l’app depuis la nouvelle icône et connecte-toi une fois.</div>${later}</div>`;
+  return '';
+}
+
 /* ---------- render infrastructure ---------- */
 const root = document.getElementById('root');
 let lastViewKey = '';
@@ -348,6 +419,7 @@ function render() {
   const key = [U.tab, U.view, U.sel, U.selPlayer, U.statTab, U.agFilter, S.teamId].join('|');
   const keep = sc && key === lastViewKey ? sc.scrollTop : null;
   root.innerHTML = view();
+  document.title = S.team ? (S.team.title || ('Interclub ' + (S.team.name || ''))) : 'Interclub';
   lastViewKey = key;
   const sc2 = document.getElementById('scroll');
   if (sc2 && keep !== null) sc2.scrollTop = keep;
@@ -390,7 +462,7 @@ function vAuth() {
   ${m === 'signup' ? `<div class="small">${PWD_RULE}</div>` : ''}
   ${U.aErr ? `<div class="err">${esc(U.aErr)}</div>` : ''}${U.aOk ? `<div class="ok">${esc(U.aOk)}</div>` : ''}
   <button class="btn primary" data-a="authGo">${m === 'signup' ? 'Créer le compte' : m === 'reset' ? 'Envoyer le lien' : 'Se connecter'}</button>
-  ${m === 'login' ? `<button class="link" data-a="authMode" data-v="signup">Pas encore de compte ? Créer un compte</button><button class="link" data-a="authMode" data-v="reset">Mot de passe oublié</button>` : `<button class="link" data-a="authMode" data-v="login">Retour à la connexion</button>`}
+  ${m === 'login' ? `<button class="link" data-a="authMode" data-v="reset">Mot de passe oublié</button><div class="small">Pas encore d’accès ? Ton capitaine crée ton compte et t’envoie ton identifiant et ton mot de passe.</div>` : `<button class="link" data-a="authMode" data-v="login">Retour à la connexion</button>`}
   <div class="small center">${VERSION}</div>
   </div>`;
 }
@@ -404,11 +476,20 @@ function vNoTeam() {
 
 /* ---------- header & nav ---------- */
 function vHeader(title, plusAction, plusLabel) {
+  const t = S.team || {};
+  const tTitle = t.title || ('Interclub ' + (t.name || ''));
+  const editBtn = isCapReal() ? `<button class="mini" style="flex:0 0 34px;border:none;background:transparent;color:var(--mut)" data-a="editTitle" aria-label="Modifier le titre">✎</button>` : '';
+  const head = U.titleEdit && isCapReal()
+    ? `<div class="panel" style="gap:10px"><label class="f">Titre affiché<input class="in" data-f="tiTitle" value="${esc(U.tiTitle)}" placeholder="ex. Interclub M4"></label>
+       <div class="row2"><label class="f">Nom court (menu)<input class="in" data-f="tiName" value="${esc(U.tiName)}"></label><label class="f">Saison<input class="in" data-f="tiSeason" value="${esc(U.tiSeason)}"></label></div>
+       <div class="flex"><button class="btn" data-a="cancelTitle">Annuler</button><button class="btn primary" data-a="saveTitle">Enregistrer</button></div></div>`
+    : `<div style="display:flex;align-items:center;gap:4px;min-width:0"><div class="t15 ell" style="font-size:17px;font-weight:800;color:var(--ink)">${esc(tTitle)}</div>${editBtn}</div>`;
   const teamSel = S.teams.length > 1
-    ? `<select class="in" style="height:40px;font-size:14px;font-weight:700;width:auto;max-width:100%" data-f="teamPick" data-r="1" aria-label="Équipe">${S.teams.map(t => `<option value="${esc(t.id)}" ${t.id === S.teamId ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select>`
-    : `<div class="sub">${esc(S.team ? S.team.name : '')}${S.team && S.team.season ? ' · ' + esc(S.team.season) : ''}</div>`;
+    ? `<select class="in" style="height:38px;font-size:13px;font-weight:700;width:auto;max-width:100%" data-f="teamPick" data-r="1" aria-label="Changer d’équipe">${S.teams.map(x => `<option value="${esc(x.id)}" ${x.id === S.teamId ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>`
+    : (t.season ? `<div class="sub">${esc(t.season)}</div>` : '');
   return `<div class="top">
-  <div class="toprow"><div style="display:flex;flex-direction:column;gap:4px;min-width:0"><h1>${esc(title)}</h1>${teamSel}</div>
+  <div style="display:flex;flex-direction:column;gap:6px;padding-bottom:10px;border-bottom:1px solid var(--line)">${head}${U.titleEdit ? '' : teamSel}</div>
+  <div class="toprow"><h1>${esc(title)}</h1>
   ${plusAction ? `<button class="round" data-a="${plusAction}" aria-label="${esc(plusLabel)}">${ICON.plus}</button>` : ''}</div>
   ${isCapReal() ? `<div class="seg" style="grid-template-columns:1fr 1fr"><button class="${U.roleView === 'cap' ? 'on' : ''}" data-a="role" data-v="cap">Vue capitaine</button><button class="${U.roleView !== 'cap' ? 'on' : ''}" data-a="role" data-v="player">Vue joueur</button></div>` : ''}
   </div>`;
@@ -440,14 +521,18 @@ function vAgenda() {
     const d = dt(e.date); const r = e.r || {};
     const yes = Object.values(r).filter(v => v === 'yes').length;
     const mine = r[mk] || 'none';
-    const right = cap ? `<span class="pill">${yes} / ${e.free ? (e.invited || []).length : nMembers}</span>` : `<span class="pill ${mine}">${ST[mine]}</span>`;
+    const full = isFull(e);
+    const inOther = !cap && mine !== 'yes' && e.group && groupOf(e).some(x => x.id !== e.id && (x.r || {})[mk] === 'yes');
+    const right = cap ? `<span class="pill ${full ? 'no' : ''}">${yes} / ${e.max || (e.free ? (e.invited || []).length : nMembers)}</span>`
+      : (mine === 'yes' ? `<span class="pill yes">${ST.yes}</span>` : inOther ? `<span class="pill">Autre créneau</span>` : full ? `<span class="pill no">Complet</span>` : `<span class="pill ${mine}">${ST[mine]}</span>`);
     return `<button class="ev" data-a="open" data-v="${esc(e.id)}">
     <span class="tile" style="background:${typeOf(e.type).color}"><b>${d.getDate()}</b><span>${JOURS[d.getDay()]}</span></span>
-    <span class="grow"><span class="t15 ell">${esc(e.title)}</span><span class="small ell">${e.free ? 'Partie libre · ' : ''}${esc(typeText(e))}${e.time ? ' · ' + esc(e.time) : ''}</span></span>${right}</button>`;
+    <span class="grow"><span class="t15 ell">${esc(e.title)}</span><span class="small ell">${e.free ? 'Partie libre · ' : ''}${esc(typeText(e))}${e.time ? ' · ' + esc(e.time) : ''}${e.max ? ' · max ' + e.max : ''}${e.group ? ' · créneau lié' : ''}</span></span>${right}</button>`;
   };
   const groups = gs => gs.map(g => `<div class="month">${g.month}</div>${g.items.map(item).join('')}`).join('');
   const now = new Date();
   return vHeader('Agenda', 'openAdd', cap ? 'Ajouter un événement' : 'Organiser une partie')
+    + (vInstall() ? `<div style="padding:0 16px 10px">${vInstall()}</div>` : '')
     + `<div class="chips">${FILTERS.map(f => `<button class="chip ${U.agFilter === f.k ? 'on' : ''}" data-a="filter" data-v="${f.k}">${f.l}</button>`).join('')}</div>
     <div class="scroll" id="scroll" style="gap:8px">
     ${!evs.length ? `<div class="small center" style="padding:24px">Aucun événement${U.agFilter !== 'all' ? ' de ce type' : ''}.</div>` : ''}
@@ -458,6 +543,24 @@ function vAgenda() {
 }
 
 /* ---------- detail ---------- */
+function vParticipation(ev, my) {
+  const mk = me(), full = isFull(ev);
+  const other = ev.group ? groupOf(ev).find(x => x.id !== ev.id && (x.r || {})[mk] === 'yes') : null;
+  let info = '', yesBtn;
+  if (my === 'yes') yesBtn = `<button class="btn sel" data-a="setMine" data-v="yes">Je participe</button>`;
+  else if (other) { info = `<div class="small">Tu es inscrit au créneau du <b>${esc(slotLabel(other))}</b>. Un seul créneau possible.</div>`; yesBtn = full ? `<button class="btn" disabled style="opacity:.5">Complet</button>` : `<button class="btn" data-a="switchSlot" data-v="${esc(other.id)}">Prendre ce créneau</button>`; }
+  else if (full) { info = '<div class="small">Le nombre maximum de joueurs est atteint.</div>'; yesBtn = `<button class="btn" disabled style="opacity:.5">Complet</button>`; }
+  else yesBtn = `<button class="btn" data-a="setMine" data-v="yes">Je participe</button>`;
+  return `<div class="card"><div class="toprow"><div class="t14">Ta participation</div>${ev.max ? `<span class="pill ${full ? 'no' : 'yes'}">${yesCount(ev)} / ${ev.max} places</span>` : ''}</div>
+  ${info}<div class="flex">${yesBtn}<button class="btn ${my === 'no' ? 'selno' : ''}" data-a="setMine" data-v="no">Absent</button></div></div>`;
+}
+function vSlots(ev) {
+  const g = groupOf(ev); if (g.length < 2) return '';
+  return `<div class="card" style="gap:8px"><div class="t14" style="font-weight:800">Créneaux liés (un seul par joueur)</div>
+  ${g.map(x => `<button class="ev" data-a="open" data-v="${esc(x.id)}" style="padding:8px 12px;${x.id === ev.id ? 'border-color:var(--g);background:var(--gl)' : ''}">
+    <span class="grow"><span class="t14">${esc(slotLabel(x))}</span>${x.place ? `<span class="small">${esc(x.place)}</span>` : ''}</span>
+    <span class="pill ${isFull(x) ? 'no' : ''}">${yesCount(x)}${x.max ? ' / ' + x.max : ''}${isFull(x) ? ' · complet' : ''}</span></button>`).join('')}</div>`;
+}
 function vDetail(ev) {
   const mk = me(), cap = capView(), t = typeOf(ev.type), r = ev.r || {};
   const pool = ev.free ? (ev.invited || []) : ((S.team.memberKeys) || []);
@@ -487,14 +590,13 @@ function vDetail(ev) {
     ${ev.notes ? `<div class="small">${esc(ev.notes)}</div>` : ''}
   </div>
   ${ev.free && ev.sideA ? `<div class="card vs"><div class="t14 center">${ev.sideA.map(k => esc(nameOf(k))).join('<br>')}</div><div class="small" style="font-weight:800">VS</div><div class="t14 center">${ev.sideB.map(k => esc(nameOf(k))).join('<br>')}</div></div>` : ''}
-  ${concerned ? `<div class="card"><div class="t14">Ta participation</div><div class="flex">
-    <button class="btn ${my === 'yes' ? 'sel' : ''}" data-a="setMine" data-v="yes">Je participe</button>
-    <button class="btn ${my === 'no' ? 'selno' : ''}" data-a="setMine" data-v="no">Absent</button></div></div>` : ''}
+  ${concerned ? vParticipation(ev, my) : ''}
+  ${ev.group ? vSlots(ev) : ''}
   ${isGolf(ev.type) ? `<button class="ev" data-a="openResults" style="padding:14px 16px;border-radius:18px">
     <span style="width:40px;height:40px;flex-shrink:0;border-radius:12px;background:var(--gl);color:var(--gd);display:flex;align-items:center;justify-content:center">${ICON.trophy}</span>
     <span class="grow"><span class="t15" style="font-weight:800">Résultats</span><span class="small">${esc(resSummary)}</span></span>${ICON.chev}</button>` : ''}
   <div style="display:flex;flex-direction:column;gap:10px">
-    <div class="toprow"><div style="font-size:16px;font-weight:800">Réponses</div><div class="small">${yes} présents · ${no} absents · ${pool.length - yes - no} sans réponse</div></div>
+    <div class="toprow"><div style="font-size:16px;font-weight:800">Réponses</div><div class="small">${yes}${ev.max ? ' / ' + ev.max : ''} présents · ${no} absents · ${pool.length - yes - no} sans réponse</div></div>
     ${canSet ? '<div class="small">Capitaine : touche le statut d’un joueur pour le changer (À répondre → Présent → Absent).</div>' : ''}
     <div class="list">${rows.map(x => `<div class="li"><div class="av">${esc(initials(nameOf(x.k)))}</div><div class="grow t14" style="font-weight:600">${esc(nameOf(x.k))}${x.k === mk ? ' (toi)' : ''}</div>
       ${canSet ? `<button class="pill ${x.v} click" data-a="cycle" data-v="${esc(x.k)}" aria-label="Changer la présence de ${esc(nameOf(x.k))}">${ST[x.v]}</button>` : `<span class="pill ${x.v}">${ST[x.v]}</span>`}</div>`).join('') || '<div class="li small">Aucun joueur.</div>'}</div>
@@ -608,6 +710,11 @@ function vAdd() {
   ${!cap && !isMatch ? `<div class="f" style="display:flex;flex-direction:column;gap:8px;font-size:13px;font-weight:700;color:var(--ink2)">Joueurs invités (max. 3)<div class="chiplist">${others.map(p => `<button class="chip2 ${(f.guests || []).includes(p.k) ? 'on' : ''}" data-a="guest" data-v="${esc(p.k)}">${esc(p.name)}</button>`).join('')}</div></div>` : ''}
   <label class="f">${cap && !isIC ? 'Intitulé' : 'Intitulé (facultatif)'}<input class="in" data-f="f.title" value="${esc(f.title)}"></label>
   <div class="row2"><label class="f">Date<input class="in" type="date" data-f="f.date" value="${esc(f.date)}"></label><label class="f">Heure<input class="in" type="time" data-f="f.time" value="${esc(f.time)}"></label></div>
+  ${cap ? `<label class="f">Nombre maximum de joueurs (facultatif)<input class="in" type="number" min="1" inputmode="numeric" data-f="f.max" value="${esc(f.max)}" placeholder="illimité"></label>
+  <div style="display:flex;flex-direction:column;gap:8px"><div style="font-size:13px;font-weight:700;color:var(--ink2)">Créneaux liés (facultatif)</div>
+  ${(f.slots || []).map((sl, i) => `<div class="flex" style="align-items:center"><input class="in" type="date" data-f="slot.${i}.date" value="${esc(sl.date)}" aria-label="Date du créneau ${i + 2}"><input class="in" type="time" data-f="slot.${i}.time" value="${esc(sl.time)}" aria-label="Heure du créneau ${i + 2}"><button class="mini" style="flex:0 0 34px" data-a="delSlot" data-v="${i}" aria-label="Retirer ce créneau">✕</button></div>`).join('')}
+  <button class="btn dashed" data-a="addSlot">+ Ajouter un créneau lié</button>
+  ${(f.slots || []).length ? '<div class="small">Chaque créneau devient un événement avec le même maximum. Un joueur ne peut s’inscrire qu’à un seul.</div>' : ''}</div>` : ''}
   <label class="f">Lieu<input class="in" data-f="f.place" value="${esc(f.place)}"></label>
   ${cap ? `<label class="f">Remarque (facultatif)<input class="in" data-f="f.notes" value="${esc(f.notes)}"></label>` : ''}
   ${U.fErr ? `<div class="err">${esc(U.fErr)}</div>` : ''}
@@ -636,21 +743,25 @@ function vSquad() {
     const isNew = U.mEdit === '__new';
     html += `<div class="panel"><div class="t14" style="font-weight:800">${isNew ? 'Ajouter un joueur' : 'Modifier ' + esc(nameOf(U.mEdit))}</div>
     <label class="f">Prénom et nom<input class="in" data-f="mName" value="${esc(U.mName)}"></label>
-    ${isNew ? `<label class="f">E-mail (celui de son compte)<input class="in" type="email" inputmode="email" data-f="mEmail" value="${esc(U.mEmail)}"></label>` : `<div class="small">${esc(U.mEmail)}</div>`}
+    ${isNew ? `<label class="f">E-mail (sera son identifiant)<input class="in" type="email" inputmode="email" data-f="mEmail" value="${esc(U.mEmail)}"></label><div class="small">Un mot de passe aléatoire est créé automatiquement.</div>` : `<div class="small">Identifiant : <b>${esc(U.mEmail)}</b></div>`}
     <label class="f">Handicap<input class="in" inputmode="decimal" data-f="mHcp" value="${esc(U.mHcp)}"></label>
-    <label class="f">N° de GSM<input class="in" type="tel" inputmode="tel" data-f="mPhone" value="${esc(U.mPhone)}"></label>
+    <label class="f">N° de GSM (WhatsApp)<input class="in" type="tel" inputmode="tel" data-f="mPhone" value="${esc(U.mPhone)}" placeholder="ex. 0475 12 34 56"></label>
     ${!isNew && U.mPhone ? `<div class="flex"><a class="btn center" style="display:flex;align-items:center;justify-content:center;text-decoration:none" href="${esc(telHref(U.mPhone))}">Appeler</a><a class="btn center" style="display:flex;align-items:center;justify-content:center;text-decoration:none" href="${esc(waHref(U.mPhone))}" target="_blank" rel="noopener">WhatsApp</a></div>` : ''}
     ${U.mErr ? `<div class="err">${esc(U.mErr)}</div>` : ''}
     <div class="flex"><button class="btn" data-a="cancelMember">Annuler</button><button class="btn primary" data-a="saveMember">${isNew ? 'Ajouter' : 'Enregistrer'}</button></div>
+    ${!isNew && U.mEmail && !(S.team.members[U.mEdit] || {}).demo ? (pwdOf(U.mEdit)
+      ? `<div style="border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:8px"><div class="t14" style="font-weight:800">Accès du joueur</div><div class="small">Mot de passe : <b>${esc(pwdOf(U.mEdit))}</b> (sauf s’il l’a changé via « Mot de passe oublié »)</div>${sendButtons(U.mName, U.mEmail, pwdOf(U.mEdit), U.mPhone)}</div>`
+      : '<div class="small">Mot de passe inconnu (compte créé avant cette version ou par le joueur). En cas d’oubli : « Mot de passe oublié » sur l’écran de connexion.</div>') : ''}
     ${!isNew && !(S.team.captains || []).includes(U.mEdit) ? `<button class="btn danger" data-a="removeMember">Retirer de l’effectif</button>` : ''}
     </div>`;
   }
+  if (cap && U.created) html += vCreated(U.created);
   html += `<div class="toprow small" style="padding:0 4px;font-weight:700"><span>Joueur</span><span>Présences</span></div>
   <div class="list">${M.map(p => {
     const x = St[p.k]; const inner = `<div class="av">${esc(initials(p.name))}</div><div class="grow"><span class="t14">${esc(p.name)}${p.k === me() ? ' (toi)' : ''}</span><span class="small">HCP ${esc(p.hcp || '—')}${(S.team.captains || []).includes(p.k) ? ' · capitaine' : ''}${S.team.members[p.k].demo ? ' · <b style="color:var(--or)">fictif</b>' : ''}${cap && phoneOf(p.k) ? ' · ' + esc(phoneOf(p.k)) : ''}</span></div><div class="t14" style="font-size:13px">${x ? x.yes + ' / ' + x.conv : ''}</div>`;
     return cap ? `<button class="li" data-a="editMember" data-v="${esc(p.k)}">${inner}</button>` : `<div class="li">${inner}</div>`;
   }).join('') || '<div class="li small">Aucun joueur.</div>'}</div>
-  ${cap ? '<div class="small">Le joueur crée son compte avec la même adresse e-mail ; il voit alors l’équipe automatiquement. Touche un joueur pour modifier son handicap.</div>' : ''}
+  ${cap ? '<div class="small">Le bouton + crée le compte du joueur avec un mot de passe aléatoire, à lui envoyer par WhatsApp. Touche un joueur pour modifier ses infos ou lui renvoyer ses accès.</div>' : ''}
   ${cap ? vDemoBox() : ''}
   ${(S.team.memberKeys || []).includes(me()) ? `<div class="card" style="gap:8px"><div class="t14" style="font-weight:800">Mon n° de GSM</div><div class="flex" style="align-items:center"><input class="in" type="tel" inputmode="tel" data-f="myPhone" aria-label="Mon numéro de GSM" value="${esc(U.myPhone ?? phoneOf(me()))}"><button class="btn" style="flex:0 0 auto" data-a="saveMyPhone">Enregistrer</button></div><div class="small">Visible uniquement par les capitaines.</div></div>` : ''}
   <button class="link center" data-a="logout">Se déconnecter (${esc(S.user.email)})</button>
@@ -658,6 +769,13 @@ function vSquad() {
   return html;
 }
 
+function vCreated(c) {
+  return `<div class="card" style="border:2px solid var(--g);gap:10px">
+  <div class="t14" style="font-weight:800">${c.exists ? esc(c.name) + ' ajouté (il avait déjà un compte)' : 'Compte créé pour ' + esc(c.name)}</div>
+  ${c.exists ? '<div class="small">Il se connecte avec son mot de passe actuel. En cas d’oubli : « Mot de passe oublié » sur l’écran de connexion.</div>'
+    : `<div>Identifiant : <b>${esc(c.email)}</b></div><div>Mot de passe : <b>${esc(c.pwd)}</b></div><div class="small">Envoie-lui ses accès (le message est déjà rédigé) :</div>${sendButtons(c.name, c.email, c.pwd, c.phone, c.team)}`}
+  <button class="btn" data-a="closeCreated">Fermer</button></div>`;
+}
 function vDemoBox() {
   const demo = members().filter(p => S.team.members[p.k].demo);
   return `<div class="card" style="gap:10px"><div class="t14" style="font-weight:800">Joueurs fictifs (simulation)</div>
@@ -737,6 +855,7 @@ function vMatches(k) {
 /* ---------- admin ---------- */
 function vAdmin() {
   let html = `<div class="top"><h1>Admin</h1><div class="sub">Équipes et capitaines</div></div><div class="scroll" id="scroll">
+  ${U.capCreated ? vCreated(U.capCreated).replace('data-a="closeCreated"', 'data-a="closeCapCreated"') : ''}
   <div class="card"><div class="t14" style="font-weight:800">Nouvelle équipe</div>
   <div class="row2"><label class="f">Nom<input class="in" data-f="tName" value="${esc(U.tName)}" placeholder="ex. Messieurs 1"></label><label class="f">Saison<input class="in" data-f="tSeason" value="${esc(U.tSeason)}" placeholder="ex. 2026-2027"></label></div>
   <button class="btn primary" data-a="createTeam">Créer l’équipe</button></div>`;
@@ -757,7 +876,7 @@ function vAdmin() {
 
 /* ---------- actions ---------- */
 function resetForm() {
-  U.f = { type: capView() ? 'interclub' : 'matchplay', format: 'single', holes: 18, home: true, club: '', title: '', date: '', time: '', place: '', notes: '', opp1: '', opp2: '', partner: '', guests: [] };
+  U.f = { max: '', slots: [], type: capView() ? 'interclub' : 'matchplay', format: 'single', holes: 18, home: true, club: '', title: '', date: '', time: '', place: '', notes: '', opp1: '', opp2: '', partner: '', guests: [] };
   U.fErr = '';
 }
 const A = {
@@ -790,8 +909,27 @@ const A = {
   backDetail: () => { U.view = 'detail'; U.pEdit = null; U.addParty = false; U.xEdit = null; render(); },
   openResults: () => { U.view = 'results'; U.pEdit = null; U.addParty = false; U.xEdit = null; render(); },
   openAdd: () => { resetForm(); U.view = 'add'; render(); },
-  setMine: v => { const k = me(); safe(() => updateDoc(evRef(U.sel), { ['r.' + k]: v })); },
-  cycle: k => { const ev = getEv(U.sel); const v = (ev.r || {})[k] || 'none'; const n = v === 'none' ? 'yes' : v === 'yes' ? 'no' : 'none'; safe(() => updateDoc(evRef(U.sel), { ['r.' + k]: n === 'none' ? deleteField() : n })); },
+  setMine: v => {
+    const k = me(), id = U.sel, ev = getEv(id);
+    if (v === 'no' || !ev.max) return safe(() => updateDoc(evRef(id), { ['r.' + k]: v }));
+    safe(() => runTransaction(db, async tx => {
+      const snap = await tx.get(evRef(id)); const d = snap.data() || {}; const r = d.r || {};
+      if (r[k] !== 'yes' && Object.values(r).filter(x => x === 'yes').length >= d.max) throw new Error('Complet : plus de place disponible.');
+      tx.update(evRef(id), { ['r.' + k]: 'yes' });
+    }));
+  },
+  switchSlot: otherId => {
+    const k = me(), id = U.sel;
+    safe(() => runTransaction(db, async tx => {
+      const snap = await tx.get(evRef(id)); const d = snap.data() || {}; const r = d.r || {};
+      if (d.max && Object.values(r).filter(x => x === 'yes').length >= d.max) throw new Error('Complet : plus de place disponible.');
+      tx.update(evRef(otherId), { ['r.' + k]: deleteField() });
+      tx.update(evRef(id), { ['r.' + k]: 'yes' });
+    }), 'Créneau changé');
+  },
+  addSlot: () => { U.f.slots = (U.f.slots || []).concat([{ date: U.f.date || '', time: '' }]); render(); },
+  delSlot: i => { U.f.slots.splice(Number(i), 1); render(); },
+  cycle: k => { const ev0 = getEv(U.sel); if (ev0.max && ((ev0.r || {})[k] || 'none') === 'none' && isFull(ev0)) toast('Attention : maximum dépassé (' + ev0.max + ')'); const ev = ev0; const v = (ev.r || {})[k] || 'none'; const n = v === 'none' ? 'yes' : v === 'yes' ? 'no' : 'none'; safe(() => updateDoc(evRef(U.sel), { ['r.' + k]: n === 'none' ? deleteField() : n })); },
   confirmDel: v => { U.confirmDel = v === '1'; render(); },
   doDelete: () => { const id = U.sel; U.view = 'list'; U.sel = null; U.confirmDel = false; render(); safe(() => deleteDoc(evRef(id)), 'Événement supprimé'); },
   fset: v => { const [k, x] = v.split(':'); U.f[k] = k === 'home' ? x === '1' : k === 'holes' ? Number(x) : x; render(); },
@@ -824,8 +962,17 @@ const A = {
       ev.invited = ev.sideA ? ev.sideA.concat(ev.sideB) : [mk].concat(f.guests);
       if (!ev.title) ev.title = ev.sideA ? names(ev.sideA) + ' vs ' + names(ev.sideB) : typeOf(f.type).l + ' entre amis';
     }
+    if (cap && has(f.max)) { const m = parseInt(f.max, 10); if (!(m >= 1)) return err('Nombre maximum invalide.'); ev.max = m; }
+    const slots = cap ? (f.slots || []).filter(sl => sl.date) : [];
+    if (cap && (f.slots || []).some(sl => !sl.date)) return err('Indique la date de chaque créneau lié.');
     U.view = 'list'; U.todayScroll = true; render();
-    safe(() => addDoc(collection(db, 'teams', S.teamId, 'events'), ev), 'Événement créé');
+    if (!slots.length) return safe(() => addDoc(collection(db, 'teams', S.teamId, 'events'), ev), 'Événement créé');
+    const group = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    safe(async () => {
+      const b = writeBatch(db);
+      [{ date: ev.date, time: ev.time }].concat(slots).forEach(sl => b.set(doc(collection(db, 'teams', S.teamId, 'events')), { ...ev, date: sl.date, time: sl.time || '', group, r: {} }));
+      await b.commit();
+    }, (slots.length + 1) + ' créneaux créés');
   },
   /* results: match play */
   editParty: i => { const ev = getEv(U.sel); const P = ev.parties || (ev.sideA ? [{ a: ev.sideA, b: ev.sideB }] : []); const p = P[Number(i)]; U.pEdit = Number(i); U.pOut = p.outcome || 'win'; U.pMargin = p.margin || '1 up'; U.addParty = false; render(); },
@@ -878,10 +1025,12 @@ const A = {
   mFilter: v => { U.mFilter = v; render(); },
   backMatches: () => { U.view = U.prevView; if (U.prevView !== 'player') U.selPlayer = null; render(); },
   /* squad */
-  addMember: () => { U.mEdit = '__new'; U.mName = U.mEmail = U.mHcp = U.mPhone = U.mErr = ''; render(); },
+  addMember: () => { U.mEdit = '__new'; U.created = null; U.mName = U.mEmail = U.mHcp = U.mPhone = U.mErr = ''; render(); },
+  closeCreated: () => { U.created = null; render(); },
+  copyAccess: v => { const [email, pwd, name, tt] = v.split('|'); const m = accessMsg(name, email, pwd, tt); const txt = m.subject + '\n\n' + m.body; (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(() => toast('Message copié'), () => toast('Copie impossible sur cet appareil')); },
   editMember: k => { const m = S.team.members[k] || {}; U.mEdit = k; U.mName = m.name || ''; U.mEmail = m.email || ''; U.mHcp = m.hcp || ''; U.mPhone = phoneOf(k); U.mErr = ''; render(); },
   cancelMember: () => { U.mEdit = null; render(); },
-  saveMember: () => {
+  saveMember: async () => {
     const name = (U.mName || '').trim(), hcp = (U.mHcp || '').trim().replace(',', '.');
     if (!name) { U.mErr = 'Indique le nom.'; return render(); }
     const phone = (U.mPhone || '').trim();
@@ -891,16 +1040,37 @@ const A = {
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { U.mErr = 'Adresse e-mail invalide.'; return render(); }
       const k = K(email);
       if ((S.team.memberKeys || []).includes(k)) { U.mErr = 'Ce joueur est déjà dans l’effectif.'; return render(); }
-      U.mEdit = null; render();
-      safe(async () => { await updateDoc(doc(db, 'teams', S.teamId), { ['members.' + k]: { name, hcp, email }, memberKeys: arrayUnion(k) }); if (phone) await setPhone(k, phone); }, 'Joueur ajouté');
+      const pwd = genPwd();
+      U.mErr = 'Création du compte…'; render();
+      try {
+        const r = await createAccount(email, name, pwd);
+        await updateDoc(doc(db, 'teams', S.teamId), { ['members.' + k]: { name, hcp, email }, memberKeys: arrayUnion(k) });
+        const ct = {}; if (phone) ct.phone = phone; if (r === 'created') ct.pwd = pwd;
+        if (Object.keys(ct).length) await setContact(k, ct);
+        U.mEdit = null; U.mErr = ''; U.created = { name, email, pwd, phone, exists: r === 'exists' };
+      } catch (e) {
+        console.error(e);
+        U.mErr = e.code === 'auth/invalid-email' ? 'Adresse e-mail invalide.' : e.code === 'permission-denied' ? 'Action non autorisée.' : 'Erreur : ' + (e.message || e);
+      }
+      render();
     } else {
       const k = U.mEdit; U.mEdit = null; render();
       const demo = S.team.members[k] && S.team.members[k].demo;
       safe(async () => { await updateDoc(doc(db, 'teams', S.teamId), { ['members.' + k + '.name']: name, ['members.' + k + '.hcp']: hcp }); if (!demo && phone !== phoneOf(k)) await setPhone(k, phone); }, 'Enregistré');
     }
   },
-  removeMember: () => { const k = U.mEdit; U.mEdit = null; render(); safe(async () => { await updateDoc(doc(db, 'teams', S.teamId), { ['members.' + k]: deleteField(), memberKeys: arrayRemove(k) }); if (phoneOf(k)) await deleteDoc(doc(db, 'teams', S.teamId, 'contacts', k)); }, 'Joueur retiré'); },
+  removeMember: () => { const k = U.mEdit; U.mEdit = null; render(); safe(async () => { await updateDoc(doc(db, 'teams', S.teamId), { ['members.' + k]: deleteField(), memberKeys: arrayRemove(k) }); if (phoneOf(k) || pwdOf(k)) await deleteDoc(doc(db, 'teams', S.teamId, 'contacts', k)); }, 'Joueur retiré'); },
   saveMyPhone: () => { const ph = (U.myPhone ?? phoneOf(me())).trim(); if (!okPhone(ph)) return toast('N° de GSM invalide.'); U.myPhone = undefined; safe(() => setPhone(me(), ph), 'GSM enregistré'); },
+  editTitle: () => { const t = S.team; U.titleEdit = true; U.tiTitle = t.title || ('Interclub ' + (t.name || '')); U.tiName = t.name || ''; U.tiSeason = t.season || ''; render(); },
+  cancelTitle: () => { U.titleEdit = false; render(); },
+  saveTitle: () => {
+    const title = (U.tiTitle || '').trim(), name = (U.tiName || '').trim(), season = (U.tiSeason || '').trim();
+    if (!title || !name) return toast('Titre et nom court obligatoires.');
+    U.titleEdit = false; render();
+    safe(() => updateDoc(doc(db, 'teams', S.teamId), { title, name, season }), 'Titre enregistré');
+  },
+  installNow: async () => { if (!installEvt) return; installEvt.prompt(); try { await installEvt.userChoice; } catch (e) {} installEvt = null; render(); },
+  installLater: () => { lsSet('ic_install_snooze', String(Date.now() + 14 * 864e5)); render(); },
   /* access requests */
   resendRequest: () => safe(() => sendRequest(), 'Demande envoyée'),
   acceptReq: id => {
@@ -954,19 +1124,25 @@ const A = {
     U.tName = U.tSeason = ''; render();
     safe(() => addDoc(collection(db, 'teams'), { name, season, captains: [], members: {}, memberKeys: [], createdAt: Date.now(), createdBy: k }), 'Équipe créée');
   },
-  capTeam: v => { U.capTeam = v || null; U.cName = U.cEmail = U.cErr = ''; render(); },
-  addCaptain: tid => {
+  capTeam: v => { U.capTeam = v || null; U.cName = U.cEmail = U.cErr = ''; U.capCreated = null; render(); },
+  addCaptain: async tid => {
     const email = (U.cEmail || '').trim().toLowerCase(), name = (U.cName || '').trim();
     if (!name || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { U.cErr = 'Nom et e-mail valides requis.'; return render(); }
-    const k = K(email); const t = S.teams.find(x => x.id === tid); const exists = t.members && t.members[k];
-    U.capTeam = null; render();
-    const upd = { captains: arrayUnion(k), memberKeys: arrayUnion(k) };
-    if (!exists) upd['members.' + k] = { name, hcp: '', email };
-    safe(async () => {
+    const k = K(email); const t = S.teams.find(x => x.id === tid); const inTeam = t.members && t.members[k];
+    const pwd = genPwd();
+    U.cErr = 'Création du compte…'; render();
+    try {
+      const r = await createAccount(email, name, pwd);
+      const upd = { captains: arrayUnion(k), memberKeys: arrayUnion(k) };
+      if (!inTeam) upd['members.' + k] = { name, hcp: '', email };
       await updateDoc(doc(db, 'teams', tid), upd);
+      if (r === 'created') await setContact(k, { pwd }, tid);
       await syncCaptainIndex(S.teams.map(x => x.id === tid ? { ...x, captains: Array.from(new Set((x.captains || []).concat([k]))) } : x));
-    }, 'Capitaine ajouté');
+      U.capTeam = null; U.cErr = ''; U.capCreated = { name, email, pwd, exists: r === 'exists', team: t.title || ('Interclub ' + t.name) };
+    } catch (e) { console.error(e); U.cErr = 'Erreur : ' + (e.message || e); }
+    render();
   },
+  closeCapCreated: () => { U.capCreated = null; render(); },
   removeCaptain: v => {
     const [tid, k] = v.split('|');
     safe(async () => {
@@ -985,8 +1161,9 @@ root.addEventListener('click', e => {
 });
 function setField(el) {
   const f = el.dataset.f; if (!f) return;
-  if (f === 'teamPick') { S.teamId = el.value; U.view = 'list'; U.todayScroll = true; subscribeTeam(); render(); return; }
-  if (f.startsWith('f.')) U.f[f.slice(2)] = el.value; else U[f] = el.value;
+  if (f === 'teamPick') { U.titleEdit = false; S.teamId = el.value; U.view = 'list'; U.todayScroll = true; subscribeTeam(); render(); return; }
+  if (f.startsWith('slot.')) { const [, i, key] = f.split('.'); U.f.slots[Number(i)][key] = el.value; }
+  else if (f.startsWith('f.')) U.f[f.slice(2)] = el.value; else U[f] = el.value;
   if (el.dataset.r) render();
 }
 root.addEventListener('input', e => { if (e.target.tagName !== 'SELECT') setField(e.target); });
