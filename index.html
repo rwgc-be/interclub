@@ -124,7 +124,7 @@ const firebaseConfig = {
 };
 // Administrateurs (création des équipes et des capitaines). Même liste que dans firestore.rules.
 const ADMINS = ["francisberlier@gmail.com"];
-const VERSION = "v2.1";
+const VERSION = "v2.2";
 /* ========================================================= */
 
 const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -233,13 +233,14 @@ function accessMsg(name, email, pwd, teamTitle) {
     body: `Bonjour ${first},\n\nTu as été ajouté à l’équipe « ${title} » dans l’application Interclub (agenda, présences, résultats et statistiques).\n\nAdresse : ${APP_URL}\nIdentifiant : ${email}\nMot de passe : ${pwd}\n\nAstuce : sur ton GSM, ouvre l’adresse puis « Ajouter à l’écran d’accueil ».\n\nÀ bientôt sur le parcours,\n${from}`
   };
 }
-function sendButtons(name, email, pwd, phone, teamTitle) {
+function sendButtons(name, email, pwd, phone, teamTitle, key, tid) {
   const m = accessMsg(name, email, pwd, teamTitle);
   const cv = [email, pwd, name, teamTitle || ''].map(esc).join('|');
   const gmail = 'https://mail.google.com/mail/?view=cm&fs=1&to=' + encodeURIComponent(email) + '&su=' + encodeURIComponent(m.subject) + '&body=' + encodeURIComponent(m.body);
   const mailto = 'mailto:' + encodeURIComponent(email) + '?subject=' + encodeURIComponent(m.subject) + '&body=' + encodeURIComponent(m.body);
-  const a = (href, label, primary) => `<a class="btn ${primary ? 'primary' : ''}" style="display:flex;align-items:center;justify-content:center;text-decoration:none;font-size:14px" href="${esc(href)}" target="_blank" rel="noopener">${label}</a>`;
-  const copy = `<button class="btn" style="font-size:14px" data-a="copyAccess" data-v="${cv}">Copier le message</button>`;
+  const mk = key ? ` data-mark="${esc(key)}|${esc(tid || '')}"` : '';
+  const a = (href, label, primary) => `<a class="btn ${primary ? 'primary' : ''}" style="display:flex;align-items:center;justify-content:center;text-decoration:none;font-size:14px" href="${esc(href)}" target="_blank" rel="noopener"${mk}>${label}</a>`;
+  const copy = `<button class="btn" style="font-size:14px" data-a="copyAccess" data-v="${cv}"${mk}>Copier le message</button>`;
   if (phone) return `${a(waHref(phone) + '?text=' + encodeURIComponent(m.body), 'Envoyer par WhatsApp', true)}<div class="row2">${a(gmail, 'Par Gmail')}${copy}</div>`;
   return `<div class="row2">${a(gmail, 'Envoyer par Gmail', true)}${a(mailto, 'Autre messagerie')}</div>${copy}<div class="small">Ajoute son n° de GSM pour pouvoir envoyer par WhatsApp.</div>`;
 }
@@ -338,6 +339,16 @@ function subscribeContacts() {
 }
 const phoneOf = k => (S.contacts[k] && S.contacts[k].phone) || '';
 const pwdOf = k => (S.contacts[k] && S.contacts[k].pwd) || '';
+// État de l'accès d'un joueur (vue capitaine)
+function accessState(k) {
+  const m = (S.team && S.team.members && S.team.members[k]) || {}, c = S.contacts[k] || {};
+  if (m.demo || !m.email || k === me()) return '';
+  if (c.sentAt) return 'sent';
+  if (c.pwd) return 'tosend';
+  if (c.hasAccount) return 'own';
+  return 'none';
+}
+const ACCESS_BADGE = { none: ['Pas d’accès', 'none'], tosend: ['À envoyer', 'none'], sent: ['Envoyé', 'yes'], own: ['Compte perso', ''] };
 const telHref = ph => 'tel:' + String(ph).replace(/[^\d+]/g, '');
 const waHref = ph => { let d = String(ph).replace(/[^\d+]/g, ''); if (d.startsWith('+')) d = d.slice(1); else if (d.startsWith('00')) d = d.slice(2); else if (d.startsWith('0')) d = '32' + d.slice(1); return 'https://wa.me/' + d; };
 const okPhone = ph => !ph || /^[+0-9][0-9 ./()-]{7,}$/.test(String(ph).trim());
@@ -755,15 +766,21 @@ function vSquad() {
     ${U.mErr ? `<div class="err">${esc(U.mErr)}</div>` : ''}
     <div class="flex"><button class="btn" data-a="cancelMember">Annuler</button><button class="btn primary" data-a="saveMember">${isNew ? 'Ajouter' : 'Enregistrer'}</button></div>
     ${!isNew && U.mEmail && !(S.team.members[U.mEdit] || {}).demo ? (pwdOf(U.mEdit)
-      ? `<div style="border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:8px"><div class="t14" style="font-weight:800">Accès du joueur</div><div class="small">Mot de passe : <b>${esc(pwdOf(U.mEdit))}</b> (sauf s’il l’a changé via « Mot de passe oublié »)</div>${sendButtons(U.mName, U.mEmail, pwdOf(U.mEdit), U.mPhone)}</div>`
-      : '<div class="small">Mot de passe inconnu (compte créé avant cette version ou par le joueur). En cas d’oubli : « Mot de passe oublié » sur l’écran de connexion.</div>') : ''}
+      ? `<div style="border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:8px"><div class="t14" style="font-weight:800">Accès du joueur</div><div class="small">Mot de passe : <b>${esc(pwdOf(U.mEdit))}</b> (sauf s’il l’a changé via « Mot de passe oublié »)</div>${sendButtons(U.mName, U.mEmail, pwdOf(U.mEdit), U.mPhone, '', U.mEdit)}</div>`
+      : (S.contacts[U.mEdit] || {}).hasAccount
+        ? '<div class="small" style="border-top:1px solid var(--line);padding-top:10px">Ce joueur a déjà son propre compte : il se connecte avec son mot de passe. En cas d’oubli : « Mot de passe oublié » sur l’écran de connexion.</div>'
+        : `<div style="border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:8px"><div class="t14" style="font-weight:800">Accès du joueur</div><div class="small">Pas encore de compte. Crée-le, puis envoie-lui ses accès.</div><button class="btn primary" data-a="createAccess" data-v="${esc(U.mEdit)}">Créer son accès</button></div>`) : ''}
     ${!isNew && !(S.team.captains || []).includes(U.mEdit) ? `<button class="btn danger" data-a="removeMember">Retirer de l’effectif</button>` : ''}
     </div>`;
   }
   if (cap && U.created) html += vCreated(U.created);
+  if (cap) {
+    const miss = M.filter(p => ['none', 'tosend'].includes(accessState(p.k)));
+    if (miss.length) html += `<div class="small" style="background:var(--orl);color:var(--or);border-radius:12px;padding:10px 12px;font-weight:600">${miss.length} joueur${miss.length > 1 ? 's' : ''} sans accès envoyé. Touche un joueur marqué « Pas d’accès » ou « À envoyer » pour lui créer et envoyer ses accès.</div>`;
+  }
   html += `<div class="toprow small" style="padding:0 4px;font-weight:700"><span>Joueur</span><span>Présences</span></div>
   <div class="list">${M.map(p => {
-    const x = St[p.k]; const inner = `<div class="av">${esc(initials(p.name))}</div><div class="grow"><span class="t14">${esc(p.name)}${p.k === me() ? ' (toi)' : ''}</span><span class="small">HCP ${esc(p.hcp || '—')}${(S.team.captains || []).includes(p.k) ? ' · capitaine' : ''}${S.team.members[p.k].demo ? ' · <b style="color:var(--or)">fictif</b>' : ''}${cap && phoneOf(p.k) ? ' · ' + esc(phoneOf(p.k)) : ''}</span></div><div class="t14" style="font-size:13px">${x ? x.yes + ' / ' + x.conv : ''}</div>`;
+    const x = St[p.k]; const inner = `<div class="av">${esc(initials(p.name))}</div><div class="grow"><span class="t14">${esc(p.name)}${p.k === me() ? ' (toi)' : ''}</span><span class="small">HCP ${esc(p.hcp || '—')}${(S.team.captains || []).includes(p.k) ? ' · capitaine' : ''}${S.team.members[p.k].demo ? ' · <b style="color:var(--or)">fictif</b>' : ''}${cap && phoneOf(p.k) ? ' · ' + esc(phoneOf(p.k)) : ''}</span></div><div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">${cap && accessState(p.k) && accessState(p.k) !== 'sent' ? `<span class="pill ${ACCESS_BADGE[accessState(p.k)][1]}" style="font-size:11px;padding:3px 8px">${ACCESS_BADGE[accessState(p.k)][0]}</span>` : ''}<span class="t14" style="font-size:13px">${x ? x.yes + ' / ' + x.conv : ''}</span></div>`;
     return cap ? `<button class="li" data-a="editMember" data-v="${esc(p.k)}">${inner}</button>` : `<div class="li">${inner}</div>`;
   }).join('') || '<div class="li small">Aucun joueur.</div>'}</div>
   ${cap ? '<div class="small">Le bouton + crée le compte du joueur avec un mot de passe aléatoire, à lui envoyer par WhatsApp. Touche un joueur pour modifier ses infos ou lui renvoyer ses accès.</div>' : ''}
@@ -778,7 +795,7 @@ function vCreated(c) {
   return `<div class="card" style="border:2px solid var(--g);gap:10px">
   <div class="t14" style="font-weight:800">${c.exists ? esc(c.name) + ' ajouté (il avait déjà un compte)' : 'Compte créé pour ' + esc(c.name)}</div>
   ${c.exists ? '<div class="small">Il se connecte avec son mot de passe actuel. En cas d’oubli : « Mot de passe oublié » sur l’écran de connexion.</div>'
-    : `<div>Identifiant : <b>${esc(c.email)}</b></div><div>Mot de passe : <b>${esc(c.pwd)}</b></div><div class="small">Envoie-lui ses accès (le message est déjà rédigé) :</div>${sendButtons(c.name, c.email, c.pwd, c.phone, c.team)}`}
+    : `<div>Identifiant : <b>${esc(c.email)}</b></div><div>Mot de passe : <b>${esc(c.pwd)}</b></div><div class="small">Envoie-lui ses accès (le message est déjà rédigé) :</div>${sendButtons(c.name, c.email, c.pwd, c.phone, c.team, c.key, c.tid)}`}
   <button class="btn" data-a="closeCreated">Fermer</button></div>`;
 }
 function vDemoBox() {
@@ -1032,6 +1049,17 @@ const A = {
   /* squad */
   addMember: () => { U.mEdit = '__new'; U.created = null; U.mName = U.mEmail = U.mHcp = U.mPhone = U.mErr = ''; render(); },
   closeCreated: () => { U.created = null; render(); },
+  createAccess: async k => {
+    const m = S.team.members[k] || {}; if (!m.email) return;
+    const pwd = genPwd();
+    U.mErr = 'Création du compte…'; render();
+    try {
+      const r = await createAccount(m.email, m.name, pwd);
+      if (r === 'created') { await setContact(k, { pwd, sentAt: deleteField() }); U.mErr = ''; toast('Accès créé : envoie-le maintenant'); }
+      else { await setContact(k, { hasAccount: true }); U.mErr = ''; toast('Ce joueur a déjà un compte'); }
+    } catch (e) { console.error(e); U.mErr = 'Erreur : ' + (e.message || e); }
+    render();
+  },
   copyAccess: v => { const [email, pwd, name, tt] = v.split('|'); const m = accessMsg(name, email, pwd, tt); const txt = m.subject + '\n\n' + m.body; (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(() => toast('Message copié'), () => toast('Copie impossible sur cet appareil')); },
   editMember: k => { const m = S.team.members[k] || {}; U.mEdit = k; U.mName = m.name || ''; U.mEmail = m.email || ''; U.mHcp = m.hcp || ''; U.mPhone = phoneOf(k); U.mErr = ''; render(); },
   cancelMember: () => { U.mEdit = null; render(); },
@@ -1052,7 +1080,8 @@ const A = {
         await updateDoc(doc(db, 'teams', S.teamId), { ['members.' + k]: { name, hcp, email }, memberKeys: arrayUnion(k) });
         const ct = {}; if (phone) ct.phone = phone; if (r === 'created') ct.pwd = pwd;
         if (Object.keys(ct).length) await setContact(k, ct);
-        U.mEdit = null; U.mErr = ''; U.created = { name, email, pwd, phone, exists: r === 'exists' };
+        if (r === 'exists') await setContact(k, { hasAccount: true });
+        U.mEdit = null; U.mErr = ''; U.created = { name, email, pwd, phone, exists: r === 'exists', key: k, tid: S.teamId };
       } catch (e) {
         console.error(e);
         U.mErr = e.code === 'auth/invalid-email' ? 'Adresse e-mail invalide.' : e.code === 'permission-denied' ? 'Action non autorisée.' : 'Erreur : ' + (e.message || e);
@@ -1143,7 +1172,7 @@ const A = {
       await updateDoc(doc(db, 'teams', tid), upd);
       if (r === 'created') await setContact(k, { pwd }, tid);
       await syncCaptainIndex(S.teams.map(x => x.id === tid ? { ...x, captains: Array.from(new Set((x.captains || []).concat([k]))) } : x));
-      U.capTeam = null; U.cErr = ''; U.capCreated = { name, email, pwd, exists: r === 'exists', team: t.title || ('Interclub ' + t.name) };
+      U.capTeam = null; U.cErr = ''; U.capCreated = { name, email, pwd, exists: r === 'exists', team: t.title || ('Interclub ' + t.name), key: k, tid };
     } catch (e) { console.error(e); U.cErr = 'Erreur : ' + (e.message || e); }
     render();
   },
@@ -1161,6 +1190,8 @@ const A = {
 
 /* ---------- event wiring ---------- */
 root.addEventListener('click', e => {
+  const mkEl = e.target.closest('[data-mark]');
+  if (mkEl && db) { const [k, tid] = mkEl.dataset.mark.split('|'); if (k) setContact(k, { sentAt: Date.now() }, tid || undefined).catch(err => console.error(err)); }
   const b = e.target.closest('[data-a]'); if (!b || !root.contains(b)) return;
   const fn = A[b.dataset.a]; if (fn) { e.preventDefault(); fn(b.dataset.v); }
 });
