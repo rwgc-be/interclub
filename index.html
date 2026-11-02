@@ -115,7 +115,7 @@ const firebaseConfig = {
 };
 // Administrateurs (création des équipes et des capitaines). Même liste que dans firestore.rules.
 const ADMINS = ["francisberlier@gmail.com"];
-const VERSION = "v1.2";
+const VERSION = "v1.4";
 /* ========================================================= */
 
 const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -196,7 +196,7 @@ if (configured) { const app = initializeApp(firebaseConfig); auth = getAuth(app)
 /* ---------- state ---------- */
 const S = {
   user: null, loading: true, teams: [], teamId: localStorage.getItem('ic_team') || null, team: null, events: [],
-  unsubTeams: null, unsubTeam: null, unsubEvents: null, pending: false,
+  unsubTeams: null, unsubTeam: null, unsubEvents: null, unsubReq: null, requests: [], unsubContacts: null, contacts: {}, pending: false,
   ui: { authMode: 'login', tab: 'agenda', view: 'list', sel: null, roleView: 'cap', agFilter: 'all', statTab: 'mp', selPlayer: null, mFilter: 'all', prevView: 'list', todayScroll: true }
 };
 const U = S.ui;
@@ -227,8 +227,8 @@ if (configured) {
 } else { S.loading = false; }
 
 function stopAll() {
-  ['unsubTeams', 'unsubTeam', 'unsubEvents'].forEach(k => { if (S[k]) { S[k](); S[k] = null; } });
-  S.teams = []; S.team = null; S.events = [];
+  ['unsubTeams', 'unsubTeam', 'unsubEvents', 'unsubReq', 'unsubContacts'].forEach(k => { if (S[k]) { S[k](); S[k] = null; } });
+  S.teams = []; S.team = null; S.events = []; S.requests = []; S.contacts = {}; S.subscribedTo = null;
 }
 function subscribeTeams() {
   const q = isAdmin() ? collection(db, 'teams') : query(collection(db, 'teams'), where('memberKeys', 'array-contains', me()));
@@ -239,20 +239,56 @@ function subscribeTeams() {
       S.teamId = mine ? mine.id : (S.teams.length ? S.teams[0].id : null);
     }
     subscribeTeam();
+    if (!S.unsubReq && (isAdmin() || S.teams.some(t => (t.captains || []).includes(me())))) subscribeRequests();
     softRender();
   }, err => { console.error(err); toast('Accès aux équipes refusé'); });
 }
+function subscribeRequests() {
+  S.unsubReq = onSnapshot(collection(db, 'requests'), snap => {
+    S.requests = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.at || 0) - (b.at || 0)); softRender();
+  }, err => console.error('requests', err));
+}
+function sendRequest() {
+  const u = auth.currentUser; if (!u) return Promise.resolve();
+  return setDoc(doc(db, 'requests', u.uid), { name: u.displayName || U.aName || u.email, email: u.email, key: K(u.email), phone: (U.aPhone || '').trim(), at: Date.now() });
+}
+async function syncCaptainIndex(teams) {
+  const keys = Array.from(new Set(teams.flatMap(t => t.captains || [])));
+  await setDoc(doc(db, 'meta', 'captains'), { keys });
+}
 function subscribeTeam() {
   if (S.subscribedTo === S.teamId) return;
-  if (S.unsubTeam) S.unsubTeam(); if (S.unsubEvents) S.unsubEvents();
-  S.unsubTeam = S.unsubEvents = null; S.team = null; S.events = []; S.subscribedTo = S.teamId;
+  if (S.unsubTeam) S.unsubTeam(); if (S.unsubEvents) S.unsubEvents(); if (S.unsubContacts) S.unsubContacts();
+  S.unsubTeam = S.unsubEvents = S.unsubContacts = null; S.team = null; S.events = []; S.contacts = {}; S.subscribedTo = S.teamId;
   if (!S.teamId) return;
   localStorage.setItem('ic_team', S.teamId);
-  S.unsubTeam = onSnapshot(doc(db, 'teams', S.teamId), d => { S.team = d.exists() ? { id: d.id, ...d.data() } : null; softRender(); });
+  S.unsubTeam = onSnapshot(doc(db, 'teams', S.teamId), d => {
+    S.team = d.exists() ? { id: d.id, ...d.data() } : null;
+    if (S.team && !S.unsubContacts) subscribeContacts();
+    softRender();
+  });
   S.unsubEvents = onSnapshot(collection(db, 'teams', S.teamId, 'events'), snap => {
     S.events = snap.docs.map(d => ({ id: d.id, r: {}, ...d.data() })); softRender();
   }, err => console.error(err));
 }
+
+function subscribeContacts() {
+  const tid = S.teamId;
+  if (isCapReal()) {
+    S.unsubContacts = onSnapshot(collection(db, 'teams', tid, 'contacts'), snap => {
+      const c = {}; snap.docs.forEach(d => c[d.id] = d.data()); S.contacts = c; softRender();
+    }, err => console.error('contacts', err));
+  } else {
+    S.unsubContacts = onSnapshot(doc(db, 'teams', tid, 'contacts', me()), d => {
+      S.contacts = d.exists() ? { [me()]: d.data() } : {}; softRender();
+    }, err => console.error('contact', err));
+  }
+}
+const phoneOf = k => (S.contacts[k] && S.contacts[k].phone) || '';
+const telHref = ph => 'tel:' + String(ph).replace(/[^\d+]/g, '');
+const waHref = ph => { let d = String(ph).replace(/[^\d+]/g, ''); if (d.startsWith('+')) d = d.slice(1); else if (d.startsWith('00')) d = d.slice(2); else if (d.startsWith('0')) d = '32' + d.slice(1); return 'https://wa.me/' + d; };
+const okPhone = ph => !ph || /^[+0-9][0-9 ./()-]{7,}$/.test(String(ph).trim());
+function setPhone(k, ph) { return setDoc(doc(db, 'teams', S.teamId, 'contacts', k), { phone: String(ph || '').trim() }); }
 
 /* ---------- stats ---------- */
 function computeStats() {
@@ -346,7 +382,9 @@ function vAuth() {
   return `<div class="auth">
   <div class="logo">Interclub</div>
   <div class="sub">${m === 'signup' ? 'Créer ton compte' : m === 'reset' ? 'Mot de passe oublié' : 'Connexion'}</div>
-  ${m === 'signup' ? `<label class="f">Prénom et nom<input class="in" data-f="aName" autocomplete="name" value="${esc(U.aName)}"></label>` : ''}
+  ${m === 'signup' ? `<label class="f">Prénom et nom<input class="in" data-f="aName" autocomplete="name" value="${esc(U.aName)}"></label>
+  <label class="f">N° de GSM<input class="in" type="tel" data-f="aPhone" autocomplete="tel" inputmode="tel" placeholder="ex. 0475 12 34 56" value="${esc(U.aPhone)}"></label>
+  <div class="small">Visible uniquement par ton capitaine.</div>` : ''}
   <label class="f">E-mail<input class="in" type="email" data-f="aEmail" autocomplete="email" inputmode="email" value="${esc(U.aEmail)}"></label>
   ${m !== 'reset' ? `<label class="f">Mot de passe<input class="in" type="password" data-f="aPwd" autocomplete="${m === 'signup' ? 'new-password' : 'current-password'}" value="${esc(U.aPwd)}"></label>` : ''}
   ${m === 'signup' ? `<div class="small">${PWD_RULE}</div>` : ''}
@@ -359,7 +397,8 @@ function vAuth() {
 function vNoTeam() {
   return `<div class="auth"><div class="logo">Interclub</div>
   <div class="card"><div class="t15">Bienvenue ${esc(S.user.displayName || '')}</div>
-  <div class="small">Ton compte est prêt, mais tu ne fais encore partie d’aucune équipe. Demande à ton capitaine de t’ajouter avec l’adresse <b>${esc(S.user.email)}</b>.</div></div>
+  <div class="small">Ton compte est prêt. Une demande d’accès a été envoyée aux capitaines : dès que le tien la valide, tu verras ton équipe ici automatiquement.</div>
+  <button class="btn" data-a="resendRequest">Renvoyer ma demande</button></div>
   <button class="link" data-a="logout">Se déconnecter</button></div>`;
 }
 
@@ -586,12 +625,21 @@ function vSquad() {
     <div><div style="font-size:22px;font-weight:800">${M.length} joueurs</div><div class="small">Effectif ouvert, sans limite</div></div>
     <div style="text-align:right"><div style="font-size:13px;font-weight:800;color:var(--g)">${(S.team.captains || []).length > 1 ? 'Capitaines' : 'Capitaine'}</div><div class="small">${esc((S.team.captains || []).map(nameOf).join(', ') || '—')}</div></div>
   </div>`;
+  if (cap) {
+    const pend = S.requests.filter(r => !(S.team.memberKeys || []).includes(r.key));
+    if (pend.length) html += `<div class="card" style="border:2px solid var(--or);gap:8px"><div class="t14" style="font-weight:800">Demandes d’accès (${pend.length})</div>
+    ${pend.map(r => `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:8px"><div class="grow"><span class="t14">${esc(r.name)}</span><span class="small">${esc(r.email)}${r.phone ? ' · ' + esc(r.phone) : ''}</span></div>
+      <button class="edit" style="color:var(--red)" data-a="refuseReq" data-v="${esc(r.id)}">Refuser</button><button class="edit" style="background:var(--g);color:#fff;border-color:var(--g)" data-a="acceptReq" data-v="${esc(r.id)}">Valider</button></div>`).join('')}
+    <div class="small">Valider ajoute le joueur à l’équipe <b>${esc(S.team.name)}</b>. Vérifie que tu le connais avant de valider.</div></div>`;
+  }
   if (cap && U.mEdit) {
     const isNew = U.mEdit === '__new';
     html += `<div class="panel"><div class="t14" style="font-weight:800">${isNew ? 'Ajouter un joueur' : 'Modifier ' + esc(nameOf(U.mEdit))}</div>
     <label class="f">Prénom et nom<input class="in" data-f="mName" value="${esc(U.mName)}"></label>
     ${isNew ? `<label class="f">E-mail (celui de son compte)<input class="in" type="email" inputmode="email" data-f="mEmail" value="${esc(U.mEmail)}"></label>` : `<div class="small">${esc(U.mEmail)}</div>`}
     <label class="f">Handicap<input class="in" inputmode="decimal" data-f="mHcp" value="${esc(U.mHcp)}"></label>
+    <label class="f">N° de GSM<input class="in" type="tel" inputmode="tel" data-f="mPhone" value="${esc(U.mPhone)}"></label>
+    ${!isNew && U.mPhone ? `<div class="flex"><a class="btn center" style="display:flex;align-items:center;justify-content:center;text-decoration:none" href="${esc(telHref(U.mPhone))}">Appeler</a><a class="btn center" style="display:flex;align-items:center;justify-content:center;text-decoration:none" href="${esc(waHref(U.mPhone))}" target="_blank" rel="noopener">WhatsApp</a></div>` : ''}
     ${U.mErr ? `<div class="err">${esc(U.mErr)}</div>` : ''}
     <div class="flex"><button class="btn" data-a="cancelMember">Annuler</button><button class="btn primary" data-a="saveMember">${isNew ? 'Ajouter' : 'Enregistrer'}</button></div>
     ${!isNew && !(S.team.captains || []).includes(U.mEdit) ? `<button class="btn danger" data-a="removeMember">Retirer de l’effectif</button>` : ''}
@@ -599,13 +647,24 @@ function vSquad() {
   }
   html += `<div class="toprow small" style="padding:0 4px;font-weight:700"><span>Joueur</span><span>Présences</span></div>
   <div class="list">${M.map(p => {
-    const x = St[p.k]; const inner = `<div class="av">${esc(initials(p.name))}</div><div class="grow"><span class="t14">${esc(p.name)}${p.k === me() ? ' (toi)' : ''}</span><span class="small">HCP ${esc(p.hcp || '—')}${(S.team.captains || []).includes(p.k) ? ' · capitaine' : ''}</span></div><div class="t14" style="font-size:13px">${x ? x.yes + ' / ' + x.conv : ''}</div>`;
+    const x = St[p.k]; const inner = `<div class="av">${esc(initials(p.name))}</div><div class="grow"><span class="t14">${esc(p.name)}${p.k === me() ? ' (toi)' : ''}</span><span class="small">HCP ${esc(p.hcp || '—')}${(S.team.captains || []).includes(p.k) ? ' · capitaine' : ''}${S.team.members[p.k].demo ? ' · <b style="color:var(--or)">fictif</b>' : ''}${cap && phoneOf(p.k) ? ' · ' + esc(phoneOf(p.k)) : ''}</span></div><div class="t14" style="font-size:13px">${x ? x.yes + ' / ' + x.conv : ''}</div>`;
     return cap ? `<button class="li" data-a="editMember" data-v="${esc(p.k)}">${inner}</button>` : `<div class="li">${inner}</div>`;
   }).join('') || '<div class="li small">Aucun joueur.</div>'}</div>
   ${cap ? '<div class="small">Le joueur crée son compte avec la même adresse e-mail ; il voit alors l’équipe automatiquement. Touche un joueur pour modifier son handicap.</div>' : ''}
+  ${cap ? vDemoBox() : ''}
+  ${(S.team.memberKeys || []).includes(me()) ? `<div class="card" style="gap:8px"><div class="t14" style="font-weight:800">Mon n° de GSM</div><div class="flex" style="align-items:center"><input class="in" type="tel" inputmode="tel" data-f="myPhone" aria-label="Mon numéro de GSM" value="${esc(U.myPhone ?? phoneOf(me()))}"><button class="btn" style="flex:0 0 auto" data-a="saveMyPhone">Enregistrer</button></div><div class="small">Visible uniquement par les capitaines.</div></div>` : ''}
   <button class="link center" data-a="logout">Se déconnecter (${esc(S.user.email)})</button>
   </div>`;
   return html;
+}
+
+function vDemoBox() {
+  const demo = members().filter(p => S.team.members[p.k].demo);
+  return `<div class="card" style="gap:10px"><div class="t14" style="font-weight:800">Joueurs fictifs (simulation)</div>
+  <div class="small">Sans compte : tu gères leur présence et leurs résultats en vue capitaine. Supprimables d’un clic, avec leurs données.</div>
+  <div class="flex" style="align-items:flex-end"><label class="f" style="flex:0 0 90px">Nombre<input class="in" type="number" min="1" max="30" inputmode="numeric" data-f="demoN" value="${esc(U.demoN || '8')}"></label><button class="btn" data-a="addDemo">Créer</button></div>
+  ${demo.length ? (U.delDemo ? `<div class="flex"><button class="btn" data-a="delDemo" data-v="">Annuler</button><button class="btn" style="background:var(--red);border-color:var(--red);color:#fff" data-a="doDelDemo">Confirmer</button></div>`
+    : `<button class="btn danger" data-a="delDemo" data-v="1">Supprimer les ${demo.length} joueurs fictifs</button>`) : ''}</div>`;
 }
 
 /* ---------- stats ---------- */
@@ -710,9 +769,11 @@ const A = {
       if (U.authMode === 'reset') { if (!email) throw { code: 'x', message: 'Indique ton e-mail.' }; await sendPasswordResetEmail(auth, email); U.aOk = 'Lien envoyé. Regarde ta boîte mail.'; }
       else if (U.authMode === 'signup') {
         if (!(U.aName || '').trim()) throw { code: 'x', message: 'Indique ton prénom et ton nom.' };
+        if (!okPhone(U.aPhone)) throw { code: 'x', message: 'N° de GSM invalide.' };
         if (!PWD_RE.test(pwd)) throw { code: 'x', message: 'Mot de passe : ' + PWD_RULE };
         const c = await createUserWithEmailAndPassword(auth, email, pwd);
         await updateProfile(c.user, { displayName: U.aName.trim() });
+        try { await sendRequest(); } catch (e) { console.error(e); }
       } else await signInWithEmailAndPassword(auth, email, pwd);
     } catch (e) {
       const m = { 'auth/invalid-email': 'Adresse e-mail invalide.', 'auth/missing-password': 'Indique un mot de passe.', 'auth/weak-password': 'Mot de passe : ' + PWD_RULE, 'auth/password-does-not-meet-requirements': 'Mot de passe : ' + PWD_RULE, 'auth/email-already-in-use': 'Un compte existe déjà avec cette adresse. Connecte-toi.', 'auth/invalid-credential': 'E-mail ou mot de passe incorrect.', 'auth/wrong-password': 'E-mail ou mot de passe incorrect.', 'auth/user-not-found': 'Aucun compte avec cette adresse.', 'auth/too-many-requests': 'Trop d’essais. Réessaie dans quelques minutes.' };
@@ -817,25 +878,75 @@ const A = {
   mFilter: v => { U.mFilter = v; render(); },
   backMatches: () => { U.view = U.prevView; if (U.prevView !== 'player') U.selPlayer = null; render(); },
   /* squad */
-  addMember: () => { U.mEdit = '__new'; U.mName = U.mEmail = U.mHcp = U.mErr = ''; render(); },
-  editMember: k => { const m = S.team.members[k] || {}; U.mEdit = k; U.mName = m.name || ''; U.mEmail = m.email || ''; U.mHcp = m.hcp || ''; U.mErr = ''; render(); },
+  addMember: () => { U.mEdit = '__new'; U.mName = U.mEmail = U.mHcp = U.mPhone = U.mErr = ''; render(); },
+  editMember: k => { const m = S.team.members[k] || {}; U.mEdit = k; U.mName = m.name || ''; U.mEmail = m.email || ''; U.mHcp = m.hcp || ''; U.mPhone = phoneOf(k); U.mErr = ''; render(); },
   cancelMember: () => { U.mEdit = null; render(); },
   saveMember: () => {
     const name = (U.mName || '').trim(), hcp = (U.mHcp || '').trim().replace(',', '.');
     if (!name) { U.mErr = 'Indique le nom.'; return render(); }
+    const phone = (U.mPhone || '').trim();
+    if (!okPhone(phone)) { U.mErr = 'N° de GSM invalide.'; return render(); }
     if (U.mEdit === '__new') {
       const email = (U.mEmail || '').trim().toLowerCase();
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { U.mErr = 'Adresse e-mail invalide.'; return render(); }
       const k = K(email);
       if ((S.team.memberKeys || []).includes(k)) { U.mErr = 'Ce joueur est déjà dans l’effectif.'; return render(); }
       U.mEdit = null; render();
-      safe(() => updateDoc(doc(db, 'teams', S.teamId), { ['members.' + k]: { name, hcp, email }, memberKeys: arrayUnion(k) }), 'Joueur ajouté');
+      safe(async () => { await updateDoc(doc(db, 'teams', S.teamId), { ['members.' + k]: { name, hcp, email }, memberKeys: arrayUnion(k) }); if (phone) await setPhone(k, phone); }, 'Joueur ajouté');
     } else {
       const k = U.mEdit; U.mEdit = null; render();
-      safe(() => updateDoc(doc(db, 'teams', S.teamId), { ['members.' + k + '.name']: name, ['members.' + k + '.hcp']: hcp }), 'Enregistré');
+      const demo = S.team.members[k] && S.team.members[k].demo;
+      safe(async () => { await updateDoc(doc(db, 'teams', S.teamId), { ['members.' + k + '.name']: name, ['members.' + k + '.hcp']: hcp }); if (!demo && phone !== phoneOf(k)) await setPhone(k, phone); }, 'Enregistré');
     }
   },
-  removeMember: () => { const k = U.mEdit; U.mEdit = null; render(); safe(() => updateDoc(doc(db, 'teams', S.teamId), { ['members.' + k]: deleteField(), memberKeys: arrayRemove(k) }), 'Joueur retiré'); },
+  removeMember: () => { const k = U.mEdit; U.mEdit = null; render(); safe(async () => { await updateDoc(doc(db, 'teams', S.teamId), { ['members.' + k]: deleteField(), memberKeys: arrayRemove(k) }); if (phoneOf(k)) await deleteDoc(doc(db, 'teams', S.teamId, 'contacts', k)); }, 'Joueur retiré'); },
+  saveMyPhone: () => { const ph = (U.myPhone ?? phoneOf(me())).trim(); if (!okPhone(ph)) return toast('N° de GSM invalide.'); U.myPhone = undefined; safe(() => setPhone(me(), ph), 'GSM enregistré'); },
+  /* access requests */
+  resendRequest: () => safe(() => sendRequest(), 'Demande envoyée'),
+  acceptReq: id => {
+    const r = S.requests.find(x => x.id === id); if (!r) return;
+    safe(async () => {
+      await updateDoc(doc(db, 'teams', S.teamId), { ['members.' + r.key]: { name: r.name, hcp: '', email: r.email }, memberKeys: arrayUnion(r.key) });
+      if (r.phone) await setPhone(r.key, r.phone);
+      await deleteDoc(doc(db, 'requests', id));
+    }, r.name + ' ajouté à l’équipe');
+  },
+  refuseReq: id => safe(() => deleteDoc(doc(db, 'requests', id)), 'Demande refusée'),
+  /* demo players */
+  addDemo: () => {
+    const n = Math.max(1, Math.min(30, Number(U.demoN || 8)));
+    const first = ['Alain', 'Bruno', 'Cédric', 'David', 'Éric', 'Fabien', 'Gilles', 'Hugo', 'Ivan', 'Jules', 'Kevin', 'Louis', 'Mathieu', 'Nicolas', 'Olivier', 'Paul', 'Quentin', 'Romain', 'Simon', 'Thierry'];
+    const ex = members().filter(p => S.team.members[p.k].demo).length;
+    const upd = {}; const keys = [];
+    for (let i = 1; i <= n; i++) {
+      const num = ex + i, k = K('test' + num + '@fictif.interclub');
+      upd['members.' + k] = { name: first[(num - 1) % first.length] + ' Test' + num, hcp: String(Math.round((2 + Math.random() * 18) * 10) / 10), demo: true };
+      keys.push(k);
+    }
+    upd.memberKeys = arrayUnion(...keys);
+    safe(() => updateDoc(doc(db, 'teams', S.teamId), upd), n + ' joueurs fictifs créés');
+  },
+  delDemo: v => { U.delDemo = !!v; render(); },
+  doDelDemo: () => {
+    U.delDemo = false; render();
+    const keys = members().filter(p => S.team.members[p.k].demo).map(p => p.k);
+    safe(async () => {
+      for (const ev of S.events) {
+        if (ev.free) continue;
+        const upd = {};
+        keys.forEach(k => {
+          if (ev.r && k in ev.r) upd['r.' + k] = deleteField();
+          if (ev.scores && k in ev.scores) upd['scores.' + k] = deleteField();
+          if (ev.extra && k in ev.extra) upd['extra.' + k] = deleteField();
+        });
+        if (ev.parties && ev.parties.some(pt => (pt.a || []).concat(Array.isArray(pt.b) ? pt.b : []).some(k => keys.includes(k))))
+          upd.parties = ev.parties.filter(pt => !(pt.a || []).concat(Array.isArray(pt.b) ? pt.b : []).some(k => keys.includes(k)));
+        if (Object.keys(upd).length) await updateDoc(evRef(ev.id), upd);
+      }
+      const tu = { memberKeys: arrayRemove(...keys) }; keys.forEach(k => tu['members.' + k] = deleteField());
+      await updateDoc(doc(db, 'teams', S.teamId), tu);
+    }, 'Joueurs fictifs supprimés');
+  },
   /* admin */
   createTeam: () => {
     const name = (U.tName || '').trim(); if (!name) return toast('Indique le nom de l’équipe.');
@@ -851,11 +962,20 @@ const A = {
     U.capTeam = null; render();
     const upd = { captains: arrayUnion(k), memberKeys: arrayUnion(k) };
     if (!exists) upd['members.' + k] = { name, hcp: '', email };
-    safe(() => updateDoc(doc(db, 'teams', tid), upd), 'Capitaine ajouté');
+    safe(async () => {
+      await updateDoc(doc(db, 'teams', tid), upd);
+      await syncCaptainIndex(S.teams.map(x => x.id === tid ? { ...x, captains: Array.from(new Set((x.captains || []).concat([k]))) } : x));
+    }, 'Capitaine ajouté');
   },
-  removeCaptain: v => { const [tid, k] = v.split('|'); safe(() => updateDoc(doc(db, 'teams', tid), { captains: arrayRemove(k) }), 'Capitaine retiré'); },
+  removeCaptain: v => {
+    const [tid, k] = v.split('|');
+    safe(async () => {
+      await updateDoc(doc(db, 'teams', tid), { captains: arrayRemove(k) });
+      await syncCaptainIndex(S.teams.map(x => x.id === tid ? { ...x, captains: (x.captains || []).filter(c => c !== k) } : x));
+    }, 'Capitaine retiré');
+  },
   delTeam: v => { U.delTeam = v || null; render(); },
-  doDelTeam: tid => { U.delTeam = null; render(); safe(() => deleteDoc(doc(db, 'teams', tid)), 'Équipe supprimée'); }
+  doDelTeam: tid => { U.delTeam = null; render(); safe(async () => { await deleteDoc(doc(db, 'teams', tid)); await syncCaptainIndex(S.teams.filter(x => x.id !== tid)); }, 'Équipe supprimée'); }
 };
 
 /* ---------- event wiring ---------- */
