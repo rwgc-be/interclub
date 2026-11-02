@@ -43,6 +43,9 @@ h2{margin:0;font-size:23px;font-weight:800;letter-spacing:-.4px}
 .deco .bgm{position:absolute;inset:0;pointer-events:none}
 .deco .ic{position:relative;z-index:1;flex-shrink:0;display:flex}
 #fx{position:fixed;inset:0;pointer-events:none;z-index:4;overflow:hidden}
+.garland{height:24px;flex-shrink:0;background-repeat:repeat-x;background-position:center top;margin-top:env(safe-area-inset-top)}
+.app.themed .hdr{padding-top:4px}
+.app.themed nav.bot{border-top-width:3px}
 #fx i{position:absolute;top:-24px;display:block;animation:fxfall linear infinite;will-change:transform}
 @keyframes fxfall{0%{transform:translate3d(0,-24px,0) rotate(0)}100%{transform:translate3d(var(--dx,20px),105vh,0) rotate(var(--rot,180deg))}}
 @media (prefers-reduced-motion: reduce){#fx{display:none}}
@@ -132,7 +135,7 @@ const firebaseConfig = {
 };
 // Administrateurs (création des équipes et des capitaines). Même liste que dans firestore.rules.
 const ADMINS = ["francisberlier@gmail.com"];
-const VERSION = "v2.6";
+const VERSION = "v2.8";
 /* ========================================================= */
 
 const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -444,6 +447,7 @@ function render() {
   const key = [U.tab, U.view, U.sel, U.selPlayer, U.statTab, U.agFilter, S.teamId].join('|');
   const keep = sc && key === lastViewKey ? sc.scrollTop : null;
   root.innerHTML = view();
+  applyDecor();
   updateFx();
   document.title = S.team ? (S.team.title || ('Interclub ' + (S.team.name || ''))) : 'Interclub';
   lastViewKey = key;
@@ -488,7 +492,8 @@ function vAuth() {
   ${m === 'signup' ? `<div class="small">${PWD_RULE}</div>` : ''}
   ${U.aErr ? `<div class="err">${esc(U.aErr)}</div>` : ''}${U.aOk ? `<div class="ok">${esc(U.aOk)}</div>` : ''}
   <button class="btn primary" data-a="authGo">${m === 'signup' ? 'Créer le compte' : m === 'reset' ? 'Envoyer le lien' : 'Se connecter'}</button>
-  ${m === 'login' ? `<button class="link" data-a="authMode" data-v="reset">Mot de passe oublié</button><div class="small">Pas encore d’accès ? Ton capitaine crée ton compte et t’envoie ton identifiant et ton mot de passe.</div>` : `<button class="link" data-a="authMode" data-v="login">Retour à la connexion</button>`}
+  <div class="small"><b>Mot de passe oublié ?</b> Demande à ton capitaine : il le voit dans ta fiche et peut te le renvoyer par WhatsApp.</div>
+  <div class="small">Pas encore d’accès ? Ton capitaine crée ton compte et t’envoie ton identifiant et ton mot de passe.</div>
   <div class="small center">${VERSION}</div>
   </div>`;
 }
@@ -521,6 +526,48 @@ const THEMES = {
   hiver: { l: 'Saison d’hiver', bg: 'linear-gradient(120deg,#DCEBFA,#BFD8F2)', ink: '#123A63', msg: 'Bon entraînement d’hiver !', icons: ['flake', 'flake'], ic: '#2B6CB0', bgIcon: 'flake', bgColor: 'rgba(43,108,176,.18)', fx: 'snow' },
   printemps: { l: 'Printemps', bg: 'linear-gradient(120deg,#FCE7EF,#E3F4DF)', ink: '#14532D', msg: 'Le printemps est là : bonne saison d’interclubs !', icons: ['blossom', 'blossom'], ic: '#E58FB0', bgIcon: 'blossom', bgColor: 'rgba(229,143,176,.25)', fx: 'petal' }
 };
+// Habillage plein écran : couleur de fond, motif répété, guirlande, couleur de la barre du bas
+const svgUri = svg => 'url("data:image/svg+xml,' + encodeURIComponent(svg) + '")';
+const DECOR = {
+  noel: {
+    bg: '#F2F6EF', nav: '#C8362B',
+    pattern: `<svg xmlns="http://www.w3.org/2000/svg" width="90" height="90"><g fill="none" stroke="#1E7A46" stroke-opacity=".10" stroke-width="1.6" stroke-linecap="round"><path d="M20 10v20M11.3 15l17.4 10M11.3 25L28.7 15"/><path d="M65 55v20M56.3 60l17.4 10M56.3 70L73.7 60"/></g><circle cx="70" cy="18" r="2" fill="#C8362B" fill-opacity=".12"/><circle cx="18" cy="68" r="2" fill="#C8362B" fill-opacity=".12"/></svg>`,
+    garland: `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="24"><path d="M0 4 Q16 14 32 4 T64 4" fill="none" stroke="#2F4F2F" stroke-width="1.5"/><g><rect x="14.5" y="8" width="3" height="3" fill="#555"/><ellipse cx="16" cy="15" rx="3.6" ry="5" fill="#E53935"/><rect x="46.5" y="8" width="3" height="3" fill="#555"/><ellipse cx="48" cy="15" rx="3.6" ry="5" fill="#F5C542"/></g></svg>`,
+    garland2: ['#E53935', '#F5C542', '#43A047', '#1E88E5']
+  },
+  stnicolas: {
+    bg: '#FBF3EC', nav: '#C8362B',
+    pattern: `<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80"><g fill="#C8362B" fill-opacity=".09"><path d="M20 8l2.4 5 5.6.6-4.2 3.8 1.2 5.5L20 20l-5 2.9 1.2-5.5L12 13.6l5.6-.6z"/><path d="M60 48l2.4 5 5.6.6-4.2 3.8 1.2 5.5L60 60l-5 2.9 1.2-5.5L52 53.6l5.6-.6z"/></g><circle cx="62" cy="16" r="2.2" fill="#E0A82E" fill-opacity=".18"/><circle cx="16" cy="58" r="2.2" fill="#E0A82E" fill-opacity=".18"/></svg>`,
+    garland: `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="24"><path d="M0 3 Q24 9 48 3" fill="none" stroke="#7A4B2A" stroke-width="1.4"/><path d="M4 4.5 L12 20 L20 6.5Z" fill="#C8362B"/><path d="M28 6.5 L36 20 L44 4.5Z" fill="#F5C542"/></svg>`
+  },
+  nouvelan: {
+    bg: '#F5F3EC', nav: '#B8860B',
+    pattern: `<svg xmlns="http://www.w3.org/2000/svg" width="70" height="70"><g fill="#B8860B" fill-opacity=".13"><path d="M15 6l1.8 3.9 4.2.4-3.2 2.9.9 4.2L15 15.3l-3.7 2.1.9-4.2L9 10.3l4.2-.4z"/><circle cx="52" cy="20" r="1.8"/><circle cx="40" cy="52" r="1.4"/><path d="M58 44l1.2 2.6 2.8.3-2.1 1.9.6 2.8-2.5-1.4-2.5 1.4.6-2.8-2.1-1.9 2.8-.3z"/></g></svg>`,
+    garland: `<svg xmlns="http://www.w3.org/2000/svg" width="56" height="24"><path d="M0 2H56" stroke="#B8860B" stroke-width="1"/><path d="M12 2v8M40 2v12" stroke="#B8860B" stroke-width=".8"/><path d="M12 9l1.6 3.4 3.7.4-2.8 2.5.8 3.7L12 17.1 8.7 19l.8-3.7-2.8-2.5 3.7-.4z" fill="#F5C542"/><path d="M40 13l1.2 2.5 2.7.3-2 1.8.6 2.7-2.5-1.4-2.5 1.4.6-2.7-2-1.8 2.7-.3z" fill="#E0A82E"/><circle cx="26" cy="6" r="1.6" fill="#E4572E"/><circle cx="50" cy="5" r="1.4" fill="#29A4D9"/></svg>`
+  },
+  hiver: {
+    bg: '#EDF3FA', nav: '#2B6CB0',
+    pattern: `<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><g fill="none" stroke="#2B6CB0" stroke-opacity=".11" stroke-width="1.5" stroke-linecap="round"><path d="M22 10v22M12.5 15.5l19 11M12.5 26.5l19-11"/><path d="M72 58v18M64.2 62.5l15.6 9M64.2 71.5l15.6-9"/></g><circle cx="74" cy="20" r="2" fill="#2B6CB0" fill-opacity=".10"/><circle cx="24" cy="74" r="2.4" fill="#2B6CB0" fill-opacity=".10"/></svg>`,
+    garland: `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="24"><rect width="40" height="4" fill="#FFFFFF"/><path d="M0 4h40" stroke="#BFD8F2" stroke-width="1"/><path d="M4 4l3 14 3-14zM16 4l2 8 2-8zM26 4l3.5 18L33 4z" fill="#CFE3F7" stroke="#9CC3EA" stroke-width=".6"/></svg>`
+  },
+  printemps: {
+    bg: '#FBF5F7', nav: '#D96A94',
+    pattern: `<svg xmlns="http://www.w3.org/2000/svg" width="88" height="88"><g fill="#E58FB0" fill-opacity=".14"><circle cx="20" cy="15" r="3.4"/><circle cx="24.8" cy="18.5" r="3.4"/><circle cx="23" cy="24" r="3.4"/><circle cx="17" cy="24" r="3.4"/><circle cx="15.2" cy="18.5" r="3.4"/></g><circle cx="20" cy="20" r="2.2" fill="#F5C542" fill-opacity=".3"/><path d="M60 62c6-6 14-6 18 0-6 4-12 4-18 0z" fill="#7BC950" fill-opacity=".16"/></svg>`,
+    garland: `<svg xmlns="http://www.w3.org/2000/svg" width="52" height="24"><path d="M0 6 Q13 12 26 6 T52 6" fill="none" stroke="#6BAF5B" stroke-width="1.6"/><path d="M10 9c-3 1-5 4-4 6 3-1 5-3 4-6zM38 9c3 1 5 4 4 6-3-1-5-3-4-6z" fill="#7BC950"/><g fill="#F28CB1"><circle cx="26" cy="10" r="2.6"/><circle cx="29" cy="12.2" r="2.6"/><circle cx="27.9" cy="15.6" r="2.6"/><circle cx="24.1" cy="15.6" r="2.6"/><circle cx="23" cy="12.2" r="2.6"/></g><circle cx="26" cy="13" r="1.6" fill="#F5C542"/></svg>`
+  }
+};
+// Guirlande de Noël : ampoules de couleurs alternées
+DECOR.noel.garland = `<svg xmlns="http://www.w3.org/2000/svg" width="96" height="24"><path d="M0 4 Q12 13 24 4 T48 4 T72 4 T96 4" fill="none" stroke="#2F4F2F" stroke-width="1.5"/>${['#E53935', '#F5C542', '#43A047', '#1E88E5'].map((c, i) => `<rect x="${10.5 + i * 24}" y="7.5" width="3" height="3" fill="#555"/><ellipse cx="${12 + i * 24}" cy="15" rx="3.6" ry="5" fill="${c}"/><ellipse cx="${10.8 + i * 24}" cy="13.2" rx="1" ry="1.6" fill="#fff" fill-opacity=".6"/>`).join('')}</svg>`;
+function applyDecor() {
+  const k = S.user && S.team ? activeTheme() : 'none';
+  const d = DECOR[k];
+  root.classList.toggle('themed', !!d);
+  root.style.backgroundColor = d ? d.bg : '';
+  root.style.backgroundImage = d ? svgUri(d.pattern) : '';
+  const g = root.querySelector('.garland'); if (g) g.remove();
+  if (d) root.insertAdjacentHTML('afterbegin', `<div class="garland" aria-hidden="true" style="background-image:${svgUri(d.garland).replace(/"/g, '&quot;')}"></div>`);
+  const nav = root.querySelector('nav.bot'); if (nav) nav.style.borderTopColor = d ? d.nav : '';
+}
 // Périodes du thème automatique (mois-jour, bornes incluses)
 const AUTO_THEMES = [['11-20', '12-06', 'stnicolas'], ['12-07', '12-27', 'noel'], ['12-28', '01-10', 'nouvelan'], ['01-11', '03-19', 'hiver'], ['03-20', '05-31', 'printemps']];
 function activeTheme() {
@@ -554,7 +601,7 @@ function updateFx() {
   let el = document.getElementById('fx'); if (el) el.remove();
   if (!kind) return;
   el = document.createElement('div'); el.id = 'fx'; el.setAttribute('aria-hidden', 'true');
-  const n = 16, cols = ['#F5C542', '#E4572E', '#29A4D9', '#7BC950', '#B57BDB'];
+  const n = 26, cols = ['#F5C542', '#E4572E', '#29A4D9', '#7BC950', '#B57BDB'];
   let h = '';
   for (let i = 0; i < n; i++) {
     const left = Math.round(Math.random() * 100), dur = (kind === 'snow' ? 9 : 7) + Math.random() * 7, delay = -Math.random() * 14, sz = 4 + Math.random() * 6;
@@ -849,9 +896,9 @@ function vSquad() {
     ${U.mErr ? `<div class="err">${esc(U.mErr)}</div>` : ''}
     <div class="flex"><button class="btn" data-a="cancelMember">Annuler</button><button class="btn primary" data-a="saveMember">${isNew ? 'Ajouter' : 'Enregistrer'}</button></div>
     ${!isNew && U.mEmail && !(S.team.members[U.mEdit] || {}).demo ? (pwdOf(U.mEdit)
-      ? `<div style="border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:8px"><div class="t14" style="font-weight:800">Accès du joueur</div><div class="small">Mot de passe : <b>${esc(pwdOf(U.mEdit))}</b> (sauf s’il l’a changé via « Mot de passe oublié »)</div>${sendButtons(U.mName, U.mEmail, pwdOf(U.mEdit), U.mPhone, '', U.mEdit)}</div>`
+      ? `<div style="border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:8px"><div class="t14" style="font-weight:800">Accès du joueur</div><div class="small">Mot de passe : <b>${esc(pwdOf(U.mEdit))}</b></div>${sendButtons(U.mName, U.mEmail, pwdOf(U.mEdit), U.mPhone, '', U.mEdit)}</div>`
       : (S.contacts[U.mEdit] || {}).hasAccount
-        ? '<div class="small" style="border-top:1px solid var(--line);padding-top:10px">Ce joueur a déjà son propre compte : il se connecte avec son mot de passe. En cas d’oubli : « Mot de passe oublié » sur l’écran de connexion.</div>'
+        ? '<div class="small" style="border-top:1px solid var(--line);padding-top:10px">Ce joueur a son propre compte (créé avant) : l’app ne connaît pas son mot de passe. S’il l’oublie, demande à l’admin de supprimer son compte dans Firebase, puis fais « Créer son accès ».</div>'
         : `<div style="border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:8px"><div class="t14" style="font-weight:800">Accès du joueur</div><div class="small">Pas encore de compte. Crée-le, puis envoie-lui ses accès.</div><button class="btn primary" data-a="createAccess" data-v="${esc(U.mEdit)}">Créer son accès</button></div>`) : ''}
     ${!isNew && !(S.team.captains || []).includes(U.mEdit) ? `<button class="btn danger" data-a="removeMember">Retirer de l’effectif</button>` : ''}
     </div>`;
@@ -877,7 +924,7 @@ function vSquad() {
 function vCreated(c) {
   return `<div class="card" style="border:2px solid var(--g);gap:10px">
   <div class="t14" style="font-weight:800">${c.exists ? esc(c.name) + ' ajouté (il avait déjà un compte)' : 'Compte créé pour ' + esc(c.name)}</div>
-  ${c.exists ? '<div class="small">Il se connecte avec son mot de passe actuel. En cas d’oubli : « Mot de passe oublié » sur l’écran de connexion.</div>'
+  ${c.exists ? '<div class="small">Il se connecte avec son mot de passe actuel, que l’app ne connaît pas. S’il l’oublie, l’admin supprime son compte dans Firebase, puis « Créer son accès » dans sa fiche.</div>'
     : `<div>Identifiant : <b>${esc(c.email)}</b></div><div>Mot de passe : <b>${esc(c.pwd)}</b></div><div class="small">Envoie-lui ses accès (le message est déjà rédigé) :</div>${sendButtons(c.name, c.email, c.pwd, c.phone, c.team, c.key, c.tid)}`}
   <button class="btn" data-a="closeCreated">Fermer</button></div>`;
 }
