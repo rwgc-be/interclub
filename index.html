@@ -100,7 +100,7 @@ nav.bot button.on{background:var(--gl);color:var(--gd);font-weight:800}
 <div id="root" class="app"></div>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendEmailVerification, sendPasswordResetEmail, signOut, updateProfile } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail, signOut, updateProfile } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getFirestore, collection, doc, onSnapshot, addDoc, updateDoc, deleteDoc, setDoc, query, where, deleteField, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 /* ===================== CONFIGURATION ===================== */
@@ -115,7 +115,7 @@ const firebaseConfig = {
 };
 // Administrateurs (création des équipes et des capitaines). Même liste que dans firestore.rules.
 const ADMINS = ["francisberlier@gmail.com"];
-const VERSION = "v1.0";
+const VERSION = "v1.2";
 /* ========================================================= */
 
 const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -156,6 +156,8 @@ const ICON = {
 
 /* ---------- helpers ---------- */
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const PWD_RE = /^(?=.*[A-Z])(?=.*[^A-Za-z0-9]).{8,}$/;
+const PWD_RULE = 'Au moins 8 caractères, dont 1 majuscule et 1 caractère spécial.';
 const K = email => String(email || '').trim().toLowerCase().replace(/\./g, ',');
 const typeOf = v => TYPES.find(t => t.v === v) || TYPES[1];
 const isGolf = t => ['matchplay', 'interclub', 'course18', 'course9'].includes(t);
@@ -219,7 +221,7 @@ if (configured) {
   onAuthStateChanged(auth, user => {
     S.user = user; S.loading = false;
     stopAll();
-    if (user && user.emailVerified) subscribeTeams();
+    if (user) subscribeTeams();
     render();
   });
 } else { S.loading = false; }
@@ -323,7 +325,6 @@ function view() {
   if (!configured) return `<div class="auth"><div class="logo">Interclub</div><div class="card"><div class="t15">Configuration manquante</div><div class="small">Colle la configuration Firebase dans le fichier index.html (bloc CONFIGURATION), puis recharge la page.</div></div></div>`;
   if (S.loading) return `<div class="auth"><div class="logo">Interclub</div><div class="small">Chargement…</div></div>`;
   if (!S.user) return vAuth();
-  if (!S.user.emailVerified) return vVerify();
   let body = '';
   if (!S.teams.length && !isAdmin()) body = vNoTeam();
   else if (U.tab === 'admin') body = vAdmin();
@@ -348,19 +349,12 @@ function vAuth() {
   ${m === 'signup' ? `<label class="f">Prénom et nom<input class="in" data-f="aName" autocomplete="name" value="${esc(U.aName)}"></label>` : ''}
   <label class="f">E-mail<input class="in" type="email" data-f="aEmail" autocomplete="email" inputmode="email" value="${esc(U.aEmail)}"></label>
   ${m !== 'reset' ? `<label class="f">Mot de passe<input class="in" type="password" data-f="aPwd" autocomplete="${m === 'signup' ? 'new-password' : 'current-password'}" value="${esc(U.aPwd)}"></label>` : ''}
+  ${m === 'signup' ? `<div class="small">${PWD_RULE}</div>` : ''}
   ${U.aErr ? `<div class="err">${esc(U.aErr)}</div>` : ''}${U.aOk ? `<div class="ok">${esc(U.aOk)}</div>` : ''}
   <button class="btn primary" data-a="authGo">${m === 'signup' ? 'Créer le compte' : m === 'reset' ? 'Envoyer le lien' : 'Se connecter'}</button>
   ${m === 'login' ? `<button class="link" data-a="authMode" data-v="signup">Pas encore de compte ? Créer un compte</button><button class="link" data-a="authMode" data-v="reset">Mot de passe oublié</button>` : `<button class="link" data-a="authMode" data-v="login">Retour à la connexion</button>`}
   <div class="small center">${VERSION}</div>
   </div>`;
-}
-function vVerify() {
-  return `<div class="auth"><div class="logo">Interclub</div>
-  <div class="card"><div class="t15">Vérifie ton adresse e-mail</div>
-  <div class="small">Un e-mail de vérification a été envoyé à <b>${esc(S.user.email)}</b>. Clique sur le lien qu’il contient (regarde aussi dans les indésirables), puis reviens ici.</div>
-  <button class="btn primary" data-a="verifyCheck">J’ai vérifié</button>
-  <button class="btn" data-a="verifyResend">Renvoyer l’e-mail</button></div>
-  <button class="link" data-a="logout">Se déconnecter</button></div>`;
 }
 function vNoTeam() {
   return `<div class="auth"><div class="logo">Interclub</div>
@@ -716,18 +710,16 @@ const A = {
       if (U.authMode === 'reset') { if (!email) throw { code: 'x', message: 'Indique ton e-mail.' }; await sendPasswordResetEmail(auth, email); U.aOk = 'Lien envoyé. Regarde ta boîte mail.'; }
       else if (U.authMode === 'signup') {
         if (!(U.aName || '').trim()) throw { code: 'x', message: 'Indique ton prénom et ton nom.' };
+        if (!PWD_RE.test(pwd)) throw { code: 'x', message: 'Mot de passe : ' + PWD_RULE };
         const c = await createUserWithEmailAndPassword(auth, email, pwd);
         await updateProfile(c.user, { displayName: U.aName.trim() });
-        await sendEmailVerification(c.user);
       } else await signInWithEmailAndPassword(auth, email, pwd);
     } catch (e) {
-      const m = { 'auth/invalid-email': 'Adresse e-mail invalide.', 'auth/missing-password': 'Indique un mot de passe.', 'auth/weak-password': 'Mot de passe trop court (6 caractères minimum).', 'auth/email-already-in-use': 'Un compte existe déjà avec cette adresse. Connecte-toi.', 'auth/invalid-credential': 'E-mail ou mot de passe incorrect.', 'auth/wrong-password': 'E-mail ou mot de passe incorrect.', 'auth/user-not-found': 'Aucun compte avec cette adresse.', 'auth/too-many-requests': 'Trop d’essais. Réessaie dans quelques minutes.' };
+      const m = { 'auth/invalid-email': 'Adresse e-mail invalide.', 'auth/missing-password': 'Indique un mot de passe.', 'auth/weak-password': 'Mot de passe : ' + PWD_RULE, 'auth/password-does-not-meet-requirements': 'Mot de passe : ' + PWD_RULE, 'auth/email-already-in-use': 'Un compte existe déjà avec cette adresse. Connecte-toi.', 'auth/invalid-credential': 'E-mail ou mot de passe incorrect.', 'auth/wrong-password': 'E-mail ou mot de passe incorrect.', 'auth/user-not-found': 'Aucun compte avec cette adresse.', 'auth/too-many-requests': 'Trop d’essais. Réessaie dans quelques minutes.' };
       U.aErr = m[e.code] || e.message || String(e);
     }
     render();
   },
-  verifyCheck: async () => { await S.user.reload(); S.user = auth.currentUser; if (S.user.emailVerified) { await S.user.getIdToken(true); stopAll(); subscribeTeams(); } else toast('Adresse pas encore vérifiée.'); render(); },
-  verifyResend: () => safe(() => sendEmailVerification(S.user), 'E-mail renvoyé.'),
   logout: () => { stopAll(); S.subscribedTo = null; signOut(auth); },
   tab: v => { U.tab = v; U.view = 'list'; U.sel = null; U.selPlayer = null; U.mEdit = null; if (v === 'agenda') U.todayScroll = true; render(); },
   role: v => { U.roleView = v; U.view = 'list'; U.todayScroll = true; render(); },
