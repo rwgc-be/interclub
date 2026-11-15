@@ -898,7 +898,7 @@ function vSquad() {
     ${U.mErr ? `<div class="err">${esc(U.mErr)}</div>` : ''}
     <div class="flex"><button class="btn" data-a="cancelMember">Annuler</button><button class="btn primary" data-a="saveMember">${isNew ? 'Ajouter' : 'Enregistrer'}</button></div>
     ${!isNew && U.mEmail && !(S.team.members[U.mEdit] || {}).demo ? (pwdOf(U.mEdit)
-      ? `<div style="border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:8px"><div class="t14" style="font-weight:800">Accès du joueur</div><div class="small">Mot de passe : <b>${esc(pwdOf(U.mEdit))}</b></div>${sendButtons(U.mName, U.mEmail, pwdOf(U.mEdit), U.mPhone, '', U.mEdit)}</div>`
+      ? `<div style="border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:8px"><div class="t14" style="font-weight:800">Accès du joueur</div><div class="small">Mot de passe : <b>${esc(pwdOf(U.mEdit))}</b></div>${(S.contacts[U.mEdit] || {}).left ? '<div class="small">Ce joueur est déjà passé par l’effectif : le mot de passe ci-dessus est celui d’origine. S’il l’a changé entre-temps, qu’il utilise « Mot de passe oublié » sur l’écran de connexion.</div>' : ''}${sendButtons(U.mName, U.mEmail, pwdOf(U.mEdit), U.mPhone, '', U.mEdit)}</div>`
       : (S.contacts[U.mEdit] || {}).hasAccount
         ? '<div class="small" style="border-top:1px solid var(--line);padding-top:10px">Ce joueur a son propre compte (créé avant) : l’app ne connaît pas son mot de passe. S’il l’oublie, demande à l’admin de supprimer son compte dans Firebase, puis fais « Créer son accès ».</div>'
         : `<div style="border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:8px"><div class="t14" style="font-weight:800">Accès du joueur</div><div class="small">Pas encore de compte. Crée-le, puis envoie-lui ses accès.</div><button class="btn primary" data-a="createAccess" data-v="${esc(U.mEdit)}">Créer son accès</button></div>`) : ''}
@@ -916,6 +916,7 @@ function vSquad() {
     return cap ? `<button class="li" data-a="editMember" data-v="${esc(p.k)}">${inner}</button>` : `<div class="li">${inner}</div>`;
   }).join('') || '<div class="li small">Aucun joueur.</div>'}</div>
   ${cap ? '<div class="small">Le bouton + crée le compte du joueur avec un mot de passe aléatoire, à lui envoyer par WhatsApp. Touche un joueur pour modifier ses infos ou lui renvoyer ses accès.</div>' : ''}
+  ${cap ? vImportBox() : ''}
   ${cap ? vDemoBox() : ''}
   ${(S.team.memberKeys || []).includes(me()) ? `<div class="card" style="gap:8px"><div class="t14" style="font-weight:800">Mon n° de GSM</div><div class="flex" style="align-items:center"><input class="in" type="tel" inputmode="tel" data-f="myPhone" aria-label="Mon numéro de GSM" value="${esc(U.myPhone ?? phoneOf(me()))}"><button class="btn" style="flex:0 0 auto" data-a="saveMyPhone">Enregistrer</button></div><div class="small">Visible uniquement par les capitaines.</div></div>` : ''}
   <button class="link center" data-a="logout">Se déconnecter (${esc(S.user.email)})</button>
@@ -930,6 +931,49 @@ function vCreated(c) {
     : `<div>Identifiant : <b>${esc(c.email)}</b></div><div>Mot de passe : <b>${esc(c.pwd)}</b></div><div class="small">Envoie-lui ses accès (le message est déjà rédigé) :</div>${sendButtons(c.name, c.email, c.pwd, c.phone, c.team, c.key, c.tid)}`}
   <button class="btn" data-a="closeCreated">Fermer</button></div>`;
 }
+/* ---------- Import d'une liste de joueurs ---------- */
+function parseImport(txt) {
+  const out = [], seen = {};
+  String(txt || '').split(/\r?\n/).forEach((line, i) => {
+    const raw = line.trim();
+    if (!raw || /^(nom|name)\s*[;\t]/i.test(raw)) return;
+    const f = raw.split(/[;\t]/).map(x => x.trim());
+    const name = f[0] || '', email = (f[1] || '').toLowerCase(), hcp = (f[2] || '').replace(',', '.'), phone = f[3] || '';
+    const r = { line: i + 1, name, email, hcp, phone, err: '' };
+    if (!name) r.err = 'nom manquant';
+    else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) r.err = 'e-mail invalide';
+    else if (seen[K(email)]) r.err = 'doublon dans la liste';
+    else if ((S.team.memberKeys || []).includes(K(email))) r.err = 'déjà dans l’effectif';
+    else if (phone && !okPhone(phone)) r.err = 'n° de GSM invalide';
+    if (!r.err) seen[K(email)] = 1;
+    out.push(r);
+  });
+  return out;
+}
+function vImportBox() {
+  if (!U.impOpen) return `<button class="btn dashed" data-a="openImport">Importer une liste de joueurs</button>`;
+  const rows = parseImport(U.impTxt), ok = rows.filter(r => !r.err), ko = rows.filter(r => r.err);
+  let h = `<div class="panel"><div class="t14" style="font-weight:800">Importer une liste de joueurs</div>
+  <div class="small">Une ligne par joueur : <b>Nom ; e-mail ; handicap ; GSM</b>. Le handicap et le GSM sont facultatifs. Les joueurs déjà présents sont ignorés.</div>
+  <label class="f">Liste<textarea class="in" data-f="impTxt" data-rb="1" rows="7" style="font-family:monospace;font-size:12px" placeholder="Cédric Tedesco;cedric@exar.be;12.8;+32 476 28 53 19">${esc(U.impTxt || '')}</textarea></label>
+  <button class="btn ${U.impAcc ? 'sel' : ''}" data-a="impAcc" data-v="${U.impAcc ? 0 : 1}">${U.impAcc ? '☑' : '☐'} Créer aussi leur compte (mot de passe aléatoire)</button>`;
+  if (rows.length) {
+    h += `<div class="small" style="font-weight:700">${ok.length} joueur${ok.length > 1 ? 's' : ''} à importer${ko.length ? ` · ${ko.length} ligne${ko.length > 1 ? 's' : ''} ignorée${ko.length > 1 ? 's' : ''}` : ''}</div>`;
+    if (ko.length) h += `<div class="small">${ko.map(r => `Ligne ${r.line} : ${esc(r.name || r.email || '(vide)')} — ${r.err}`).join('<br>')}</div>`;
+  }
+  if (U.impErr) h += `<div class="err">${esc(U.impErr)}</div>`;
+  h += `<div class="flex"><button class="btn" data-a="closeImport">Fermer</button>
+  <button class="btn primary" data-a="runImport" ${U.impBusy ? 'disabled' : ''}>${U.impBusy ? 'Import en cours…' : 'Importer'}</button></div>`;
+  if (U.impLog && U.impLog.length) {
+    const made = U.impLog.filter(l => l.pwd);
+    h += `<div style="border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:6px">
+    <div class="t14" style="font-weight:800">Résultat</div>
+    <div class="small">${U.impLog.map(l => `${esc(l.name)} — ${esc(l.msg)}${l.pwd ? ' · mot de passe <b>' + esc(l.pwd) + '</b>' : ''}`).join('<br>')}</div>
+    ${made.length ? `<button class="btn primary" data-a="copyAllAccess">Copier les ${made.length} message${made.length > 1 ? 's' : ''} d’accès</button>` : ''}</div>`;
+  }
+  return h + '</div>';
+}
+
 function vDemoBox() {
   const demo = members().filter(p => S.team.members[p.k].demo);
   return `<div class="card" style="gap:10px"><div class="t14" style="font-weight:800">Joueurs fictifs (simulation)</div>
@@ -1243,7 +1287,15 @@ const A = {
       safe(async () => { await updateDoc(doc(db, 'teams', S.teamId), { ['members.' + k + '.name']: name, ['members.' + k + '.hcp']: hcp }); if (!demo && phone !== phoneOf(k)) await setPhone(k, phone); }, 'Enregistré');
     }
   },
-  removeMember: () => { const k = U.mEdit; U.mEdit = null; render(); safe(async () => { await updateDoc(doc(db, 'teams', S.teamId), { ['members.' + k]: deleteField(), memberKeys: arrayRemove(k) }); if (phoneOf(k) || pwdOf(k)) await deleteDoc(doc(db, 'teams', S.teamId, 'contacts', k)); }, 'Joueur retiré'); },
+  removeMember: () => {
+    const k = U.mEdit; U.mEdit = null; render();
+    safe(async () => {
+      await updateDoc(doc(db, 'teams', S.teamId), { ['members.' + k]: deleteField(), memberKeys: arrayRemove(k) });
+      // La fiche de contact est conservée (GSM + mot de passe) : si le joueur
+      // revient, ses accès sont retrouvés sans repasser par Firebase.
+      if (phoneOf(k) || pwdOf(k)) await setContact(k, { left: Date.now() });
+    }, 'Joueur retiré — ses accès restent mémorisés');
+  },
   saveMyPhone: () => { const ph = (U.myPhone ?? phoneOf(me())).trim(); if (!okPhone(ph)) return toast('N° de GSM invalide.'); U.myPhone = undefined; safe(() => setPhone(me(), ph), 'GSM enregistré'); },
   editTitle: () => { const t = S.team; U.titleEdit = true; U.tiTitle = t.title || ('Interclub ' + (t.name || '')); U.tiName = t.name || ''; U.tiSeason = t.season || ''; U.tiTheme = t.theme || 'none'; U.tiMsg = (t.themeMsgs || {})[U.tiTheme] || ''; render(); },
   cancelTitle: () => { U.titleEdit = false; render(); },
@@ -1268,6 +1320,52 @@ const A = {
     }, r.name + ' ajouté à l’équipe');
   },
   refuseReq: id => safe(() => deleteDoc(doc(db, 'requests', id)), 'Demande refusée'),
+  /* import d'une liste */
+  openImport: () => { U.impOpen = true; U.impTxt = U.impTxt || ''; U.impAcc = U.impAcc !== false; U.impLog = null; U.impErr = ''; render(); },
+  closeImport: () => { U.impOpen = false; U.impErr = ''; render(); },
+  impAcc: v => { U.impAcc = !!Number(v); render(); },
+  runImport: async () => {
+    const el = document.querySelector('[data-f="impTxt"]');
+    if (el) U.impTxt = el.value;
+    const all = parseImport(U.impTxt), rows = all.filter(r => !r.err);
+    if (!rows.length) { U.impErr = all.length ? 'Aucune ligne valide à importer.' : 'Colle d’abord la liste des joueurs.'; return render(); }
+    U.impBusy = true; U.impErr = ''; U.impLog = []; render();
+    for (const r of rows) {
+      const k = K(r.email);
+      try {
+        let pwd = '', state = 'ajouté';
+        if (U.impAcc) {
+          pwd = genPwd();
+          const res = await createAccount(r.email, r.name, pwd);
+          if (res === 'exists') { pwd = ''; state = 'ajouté · compte déjà existant'; }
+          else state = 'ajouté · compte créé';
+        }
+        await updateDoc(doc(db, 'teams', S.teamId), { ['members.' + k]: { name: r.name, hcp: r.hcp, email: r.email }, memberKeys: arrayUnion(k) });
+        const ct = {};
+        if (r.phone) ct.phone = r.phone;
+        if (pwd) ct.pwd = pwd;
+        if (U.impAcc && !pwd) ct.hasAccount = true;
+        if (Object.keys(ct).length) await setContact(k, ct);
+        U.impLog.push({ name: r.name, email: r.email, msg: state, pwd });
+      } catch (e) {
+        console.error(e);
+        U.impLog.push({ name: r.name, email: r.email, msg: 'échec : ' + (e.code || e.message || e), pwd: '' });
+      }
+      render();
+    }
+    U.impBusy = false;
+    const okN = U.impLog.filter(l => !/échec/.test(l.msg)).length;
+    toast(okN + ' joueur' + (okN > 1 ? 's' : '') + ' importé' + (okN > 1 ? 's' : ''));
+    render();
+  },
+  copyAllAccess: () => {
+    const made = (U.impLog || []).filter(l => l.pwd);
+    if (!made.length) return;
+    const tt = S.team ? (S.team.title || ('Interclub ' + S.team.name)) : '';
+    const txt = made.map(l => { const m = accessMsg(l.name, l.email, l.pwd, tt); return m.subject + '\n\n' + m.body; }).join('\n\n' + '—'.repeat(20) + '\n\n');
+    (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject())
+      .then(() => toast('Messages copiés'), () => toast('Copie impossible sur cet appareil'));
+  },
   /* demo players */
   addDemo: () => {
     const n = Math.max(1, Math.min(30, Number(U.demoN || 8)));
@@ -1366,6 +1464,7 @@ root.addEventListener('change', e => {
     safe(() => updateDoc(evRef(U.sel), { ['scores.' + k]: has(v) ? v : deleteField() }));
     return;
   }
+  if (el.tagName === 'TEXTAREA' && el.dataset.rb) { setField(el); render(); return; }
   if (el.tagName === 'SELECT') setField(el);
 });
 root.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.closest('.auth') && e.target.tagName === 'INPUT') A.authGo(); });
