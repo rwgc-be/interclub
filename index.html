@@ -405,13 +405,10 @@ function computeStats() {
         S2[k][h === 18 ? 'stab18' : 'stab9'].push(Number(v)); S2[k].n++;
         S2[k].hist.push({ date: ev.date, title: ev.title, tag: 'Stableford · ' + h + ' trous', label: v + ' pts', cls: '' });
       });
-    }
-    if (isGolf(ev.type)) {
-      const hx = holesOf(ev);
       Object.entries(ev.extra || {}).forEach(([k, e]) => {
         const P = S2[k] && S2[k].put; if (!P || !e) return;
-        if (has(e.putts)) { P.putts += Number(e.putts); P.holes += hx; P.rounds++; }
-        if (has(e.gir)) { P.girOk += Number(e.gir); P.girHoles += hx; }
+        if (has(e.putts)) { P.putts += Number(e.putts); P.holes += h; P.rounds++; }
+        if (has(e.gir)) { P.girOk += Number(e.gir); P.girHoles += h; }
         P.udOk += Number(e.udOk || 0); P.udTry += Number(e.udTry || 0); P.sOk += Number(e.sOk || 0); P.sTry += Number(e.sTry || 0);
       });
     }
@@ -758,35 +755,6 @@ function vDetail(ev) {
 }
 
 /* ---------- results ---------- */
-/* Petit jeu : putts, GIR, approche-put, sandy — commun aux parcours,
-   aux match play et aux interclubs. */
-function exSummary(ev, e, editable) {
-  if (!e) return editable ? '+ putts, GIR, approche-put, sandy' : '';
-  return `Putts ${e.putts || '—'} · GIR ${has(e.gir) ? e.gir + '/' + holesOf(ev) : '—'} · App. ${e.udOk || 0}/${e.udTry || 0} · Sandy ${e.sOk || 0}/${e.sTry || 0}`;
-}
-function extraKeys(ev) {
-  if (isCourse(ev.type)) {
-    const pool = ev.free ? (ev.invited || []) : (S.team.memberKeys || []);
-    return pool.filter(k => (ev.r || {})[k] === 'yes');
-  }
-  const parties = ev.parties || (ev.sideA ? [{ a: ev.sideA, b: ev.sideB }] : []);
-  const mine = (S.team && S.team.memberKeys) || [], seen = [];
-  parties.forEach(pt => [...(pt.a || []), ...(Array.isArray(pt.b) ? pt.b : [])]
-    .forEach(k => { if (mine.includes(k) && !seen.includes(k)) seen.push(k); }));
-  return seen;
-}
-function extraForm(ev) {
-  if (!U.xEdit || !extraKeys(ev).includes(U.xEdit)) return '';
-  const num = (l, f) => `<label class="f" style="font-size:12px">${l}<input class="in" type="number" inputmode="numeric" min="0" data-f="${f}" value="${esc(U[f])}" style="text-align:center;font-weight:700"></label>`;
-  return `<div class="panel"><div class="t14" style="font-weight:800">Petit jeu · ${esc(nameOf(U.xEdit))}</div>
-  <div class="row2">${num('Nombre de putts (total)', 'xPutts')}${num('Greens en régulation', 'xGir')}</div>
-  <div class="small">Green en régulation : la balle est sur le green en deux coups de moins que le par (1 coup sur un par 3).</div>
-  <div class="small">Approche-put : approche + 1 putt pour sauver le par (ou mieux). Sandy : sortie de bunker + 1 putt.</div>
-  <div class="row2">${num('Approche-put réussis', 'xUdOk')}${num('Approche-put tentés', 'xUdTry')}${num('Sandy réussis', 'xSOk')}${num('Sandy tentés', 'xSTry')}</div>
-  ${U.xErr ? `<div class="err">${esc(U.xErr)}</div>` : ''}
-  <div class="flex"><button class="btn" data-a="cancelExtra">Annuler</button><button class="btn primary" data-a="saveExtra">Valider</button></div></div>`;
-}
-
 function vResults(ev) {
   const mk = me(), cap = capView(), isIC = ev.type === 'interclub';
   let html = `<div class="top"><div><button class="back" data-a="backDetail">${ICON.back}Événement</button></div>
@@ -839,18 +807,6 @@ function vResults(ev) {
         <div class="flex"><button class="btn" data-a="closeAddParty">Annuler</button><button class="btn primary" data-a="saveParty">Ajouter</button></div></div>`;
       }
     }
-    const xk = extraKeys(ev), ex2 = ev.extra || {};
-    if (xk.length) {
-      html += `<div class="toprow"><div style="font-size:16px;font-weight:800">Petit jeu</div><div class="small" style="font-weight:700">putts · GIR</div></div>
-      <div class="list">${xk.map(k => {
-        const editable = cap || k === mk, e = ex2[k];
-        return `<div class="li" style="padding:8px 14px">${editable
-          ? `<button class="grow" style="border:none;background:none;text-align:left;padding:4px 0" data-a="openExtra" data-v="${esc(k)}"><span class="t14" style="font-weight:600">${esc(nameOf(k))}</span><span style="font-size:11px;font-weight:600;color:var(--g)">${esc(exSummary(ev, e, true))}</span></button>`
-          : `<div class="grow"><span class="t14" style="font-weight:600">${esc(nameOf(k))}</span><span class="small" style="font-size:11px">${esc(exSummary(ev, e, false))}</span></div>`}</div>`;
-      }).join('')}</div>`;
-      html += extraForm(ev);
-      html += `<div class="small">Statistiques personnelles : elles n'entrent pas dans le résultat de la rencontre.</div>`;
-    }
   }
   if (isCourse(ev.type)) {
     const pool = ev.free ? (ev.invited || []) : (S.team.memberKeys || []);
@@ -861,14 +817,23 @@ function vResults(ev) {
     <div class="list">${ys.map(k => {
       const v = sc[k], hv = has(v); const pos = hv ? 1 + vals.filter(x => x > Number(v)).length : '';
       const editable = cap || k === mk; const e = ex[k];
-      const exText = exSummary(ev, e, editable);
+      const exText = e ? `Putts ${e.putts || '—'} · GIR ${has(e.gir) ? e.gir + '/' + holesOf(ev) : '—'} · App. ${e.udOk || 0}/${e.udTry || 0} · Sandy ${e.sOk || 0}/${e.sTry || 0}` : (editable ? '+ putts, GIR, approche-put, sandy' : '');
       return `<div class="li" style="padding:8px 14px"><div class="pos ${pos === 1 ? 'first' : ''}">${pos}</div>
       ${editable ? `<button class="grow" style="border:none;background:none;text-align:left;padding:4px 0" data-a="openExtra" data-v="${esc(k)}"><span class="t14" style="font-weight:600">${esc(nameOf(k))}</span><span style="font-size:11px;font-weight:600;color:var(--g)">${esc(exText)}</span></button>
         <input class="in num" type="number" inputmode="numeric" min="0" max="60" data-score="${esc(k)}" value="${hv ? esc(v) : ''}" aria-label="Points Stableford de ${esc(nameOf(k))}">`
         : `<div class="grow"><span class="t14" style="font-weight:600">${esc(nameOf(k))}</span><span class="small" style="font-size:11px">${esc(exText)}</span></div><div class="t15" style="width:72px;text-align:center">${hv ? esc(v) : '—'}</div>`}
       <div class="small" style="width:24px">pts</div></div>`;
     }).join('') || '<div class="li small">Aucun joueur n’a confirmé sa participation.</div>'}</div>`;
-    html += extraForm(ev);
+    if (U.xEdit && ys.includes(U.xEdit)) {
+      const num = (l, f) => `<label class="f" style="font-size:12px">${l}<input class="in" type="number" inputmode="numeric" min="0" data-f="${f}" value="${esc(U[f])}" style="text-align:center;font-weight:700"></label>`;
+      html += `<div class="panel"><div class="t14" style="font-weight:800">Petit jeu · ${esc(nameOf(U.xEdit))}</div>
+      <div class="row2">${num('Nombre de putts (total)', 'xPutts')}${num('Greens en régulation', 'xGir')}</div>
+      <div class="small">Green en régulation : la balle est sur le green en deux coups de moins que le par (1 coup sur un par 3).</div>
+      <div class="small">Approche-put : approche + 1 putt pour sauver le par (ou mieux). Sandy : sortie de bunker + 1 putt.</div>
+      <div class="row2">${num('Approche-put réussis', 'xUdOk')}${num('Approche-put tentés', 'xUdTry')}${num('Sandy réussis', 'xSOk')}${num('Sandy tentés', 'xSTry')}</div>
+      ${U.xErr ? `<div class="err">${esc(U.xErr)}</div>` : ''}
+      <div class="flex"><button class="btn" data-a="cancelExtra">Annuler</button><button class="btn primary" data-a="saveExtra">Valider</button></div></div>`;
+    }
     html += `<div class="small">${cap ? 'Le capitaine peut saisir tous les scores ; chaque joueur saisit le sien.' : 'Tu saisis ton score ; le classement se met à jour.'} Le score est enregistré dès que tu quittes la case.</div>`;
   }
   return html + '</div>';
