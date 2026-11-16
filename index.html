@@ -268,7 +268,7 @@ const isAdmin = () => !!S.user && ADMINS.map(e => e.toLowerCase()).includes(S.us
 // L'admin a les droits de gestion (vue capitaine) dans toutes les équipes, sans figurer dans la liste des capitaines
 const isCapReal = () => !!S.team && (isAdmin() || (S.team.captains || []).includes(me()));
 const capView = () => isCapReal() && U.roleView === 'cap';
-const members = () => Object.entries((S.team && S.team.members) || {}).map(([k, m]) => ({ k, name: m.name || k, hcp: m.hcp || '', email: m.email || '' })).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+const members = () => Object.entries((S.team && S.team.members) || {}).map(([k, m]) => ({ k, name: m.name || k, hcp: m.hcp || '', email: m.email || '', demo: !!m.demo })).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
 const nameOf = k => (S.team && S.team.members && S.team.members[k] && S.team.members[k].name) || (String(k).includes(',') ? String(k).replace(/,/g, '.') : k);
 const names = arr => (Array.isArray(arr) ? arr.map(nameOf).join(' & ') : String(arr || ''));
 const evRef = id => doc(db, 'teams', S.teamId, 'events', id);
@@ -351,6 +351,56 @@ function subscribeContacts() {
 const phoneOf = k => (S.contacts[k] && S.contacts[k].phone) || '';
 const pwdOf = k => (S.contacts[k] && S.contacts[k].pwd) || '';
 // État de l'accès d'un joueur (vue capitaine)
+/* Date de naissance : stockee dans contacts (capitaines + le joueur lui-meme),
+   au format ISO aaaa-mm-jj. Acceptee a la saisie en jj/mm/aaaa. */
+const bornOf = k => (S.contacts[k] || {}).born || '';
+/* Les joueurs ne lisent pas contacts : seul le jour et le mois (bd, 'mm-jj')
+   sont partages dans members, de quoi afficher le bandeau sans livrer
+   ni l'annee, ni l'age, ni le reste de la fiche. */
+const bdOf = k => ((S.team && S.team.members && S.team.members[k]) || {}).bd || '';
+function birthdaysOn(d) {
+  const key = String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  return members().filter(m => !m.demo && bdOf(m.k) === key);
+}
+function toISODate(v) {
+  const t = String(v || '').trim();
+  if (!t) return '';
+  let m = t.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m) return t;
+  m = t.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);
+  if (m) return m[3] + '-' + String(m[2]).padStart(2, '0') + '-' + String(m[1]).padStart(2, '0');
+  return null;                                   // null = format non reconnu
+}
+function validDate(iso) {
+  if (!iso) return true;
+  const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return false;
+  const y = +m[1], mo = +m[2], da = +m[3];
+  // Comparaison en composants locaux : toISOString() decalerait la date
+  // d'un jour selon le fuseau et rejetterait des dates valides.
+  const d = new Date(y, mo - 1, da);
+  if (d.getFullYear() !== y || d.getMonth() !== mo - 1 || d.getDate() !== da) return false;
+  return y >= 1900 && y <= new Date().getFullYear();
+}
+const frDate = iso => { const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? m[3] + '/' + m[2] + '/' + m[1] : ''; };
+function ageOf(iso) {
+  if (!iso) return null;
+  const d = new Date(iso + 'T00:00:00'); if (isNaN(d)) return null;
+  const t = new Date(); let a = t.getFullYear() - d.getFullYear();
+  const md = t.getMonth() - d.getMonth();
+  if (md < 0 || (md === 0 && t.getDate() < d.getDate())) a--;
+  return a;
+}
+/* Jours restants avant le prochain anniversaire (0 = aujourd'hui). */
+function daysToBirthday(iso) {
+  if (!iso) return null;
+  const d = new Date(iso + 'T00:00:00'); if (isNaN(d)) return null;
+  const t = new Date(); t.setHours(0, 0, 0, 0);
+  let nx = new Date(t.getFullYear(), d.getMonth(), d.getDate());
+  if (nx < t) nx = new Date(t.getFullYear() + 1, d.getMonth(), d.getDate());
+  return Math.round((nx - t) / 86400000);
+}
+
 function accessState(k) {
   const m = (S.team && S.team.members && S.team.members[k]) || {}, c = S.contacts[k] || {};
   if (m.demo || !m.email || k === me()) return '';
@@ -685,9 +735,24 @@ function vAgenda() {
     ${!evs.length ? `<div class="small center" style="padding:24px">Aucun événement${U.agFilter !== 'all' ? ' de ce type' : ''}.</div>` : ''}
     ${groups(past)}
     <div class="today" id="today-mark"><span>Aujourd’hui · ${JOURS_LONG[now.getDay()]} ${now.getDate()} ${MOIS[now.getMonth()].toLowerCase()}</span><i></i></div>
+    ${vBirthday(now)}
     ${fut.length ? groups(fut) : (evs.length ? '<div class="small" style="padding:8px 4px">Rien de prévu à venir.</div>' : '')}
     </div>`;
 }
+
+/* Bandeau d'anniversaire : visible de toute l'equipe. */
+function vBirthday(now) {
+  const list = birthdaysOn(now);
+  if (!list.length) return '';
+  const mk = me(), moi = list.some(m => m.k === mk);
+  const autres = list.filter(m => m.k !== mk).map(m => m.name);
+  let txt;
+  if (moi && !autres.length) txt = 'Joyeux anniversaire ! 🎂';
+  else if (moi) txt = 'Joyeux anniversaire, à toi et à ' + joinFr(autres) + ' ! 🎂';
+  else txt = 'Joyeux anniversaire à ' + joinFr(autres) + ' ! 🎂';
+  return `<div class="bday">${esc(txt)}</div>`;
+}
+const joinFr = a => a.length < 2 ? (a[0] || '') : a.slice(0, -1).join(', ') + ' et ' + a[a.length - 1];
 
 /* ---------- detail ---------- */
 function vParticipation(ev, my) {
@@ -893,6 +958,8 @@ function vSquad() {
     <label class="f">Prénom et nom<input class="in" data-f="mName" value="${esc(U.mName)}"></label>
     ${isNew ? `<label class="f">E-mail (sera son identifiant)<input class="in" type="email" inputmode="email" data-f="mEmail" value="${esc(U.mEmail)}"></label><div class="small">Un mot de passe aléatoire est créé automatiquement.</div>` : `<div class="small">Identifiant : <b>${esc(U.mEmail)}</b></div>`}
     <label class="f">Handicap<input class="in" inputmode="decimal" data-f="mHcp" value="${esc(U.mHcp)}"></label>
+    <label class="f">Date de naissance<input class="in" type="date" data-f="mBorn" value="${esc(U.mBorn)}" max="${new Date().toISOString().slice(0, 10)}"></label>
+    ${U.mBorn && ageOf(U.mBorn) !== null ? `<div class="small">${ageOf(U.mBorn)} ans${daysToBirthday(U.mBorn) === 0 ? ' · c’est son anniversaire aujourd’hui 🎂' : daysToBirthday(U.mBorn) <= 30 ? ' · anniversaire dans ' + daysToBirthday(U.mBorn) + ' jour' + (daysToBirthday(U.mBorn) > 1 ? 's' : '') : ''}</div>` : ''}
     <label class="f">N° de GSM (WhatsApp)<input class="in" type="tel" inputmode="tel" data-f="mPhone" value="${esc(U.mPhone)}" placeholder="ex. 0475 12 34 56"></label>
     ${!isNew && U.mPhone ? `<div class="flex"><a class="btn center" style="display:flex;align-items:center;justify-content:center;text-decoration:none" href="${esc(telHref(U.mPhone))}">Appeler</a><a class="btn center" style="display:flex;align-items:center;justify-content:center;text-decoration:none" href="${esc(waHref(U.mPhone))}" target="_blank" rel="noopener">WhatsApp</a></div>` : ''}
     ${U.mErr ? `<div class="err">${esc(U.mErr)}</div>` : ''}
@@ -932,6 +999,9 @@ function vCreated(c) {
   <button class="btn" data-a="closeCreated">Fermer</button></div>`;
 }
 /* ---------- Import d'une liste de joueurs ---------- */
+const BDAY_CSS = `.bday{margin:2px 0;padding:10px 14px;border-radius:12px;font-weight:700;text-align:center;
+background:linear-gradient(90deg,rgba(212,160,23,.16),rgba(30,110,60,.14));border:1px solid rgba(212,160,23,.45)}`;
+(function () { const st = document.createElement('style'); st.textContent = BDAY_CSS; document.head.appendChild(st); })();
 const DROP_CSS = `.drop{border:2px dashed var(--line);border-radius:12px;padding:16px;display:flex;
 flex-direction:column;align-items:center;gap:6px;text-align:center;transition:.15s}
 .drop.over{border-color:var(--g);background:rgba(30,110,60,.07)}`;
@@ -944,12 +1014,14 @@ function parseImport(txt) {
     if (!raw || /^(nom|name)\s*[;\t]/i.test(raw)) return;
     const f = raw.split(/[;\t]/).map(x => x.trim());
     const name = f[0] || '', email = (f[1] || '').toLowerCase(), hcp = (f[2] || '').replace(',', '.'), phone = f[3] || '';
-    const r = { line: i + 1, name, email, hcp, phone, err: '' };
+    const born = toISODate(f[4] || '');
+    const r = { line: i + 1, name, email, hcp, phone, born: born || '', err: '' };
     if (!name) r.err = 'nom manquant';
     else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) r.err = 'e-mail invalide';
     else if (seen[K(email)]) r.err = 'doublon dans la liste';
     else if ((S.team.memberKeys || []).includes(K(email))) r.err = 'déjà dans l’effectif';
     else if (phone && !okPhone(phone)) r.err = 'n° de GSM invalide';
+    else if (born === null || !validDate(born)) r.err = 'date de naissance invalide';
     if (!r.err) seen[K(email)] = 1;
     out.push(r);
   });
@@ -975,6 +1047,7 @@ function sheetToLines(rows) {
   const hdr = rows[hi];
   const cHcp = colIndex(hdr, ['hcp', 'handicap', 'whs']);
   const cGsm = colIndex(hdr, ['gsm', 'portable', 'tel', 'tél', 'mobile', 'n° de gsm']);
+  const cNe = colIndex(hdr, ['date de naissance', 'naissance', 'ne le', 'né le', 'birth']);
   const out = [];
   for (let i = hi + 1; i < rows.length; i++) {
     const r = rows[i] || [];
@@ -983,7 +1056,10 @@ function sheetToLines(rows) {
     let hcp = cHcp >= 0 ? r[cHcp] : '';
     hcp = (hcp === null || hcp === undefined || hcp === '') ? '' : String(typeof hcp === 'number' ? Math.round(hcp * 10) / 10 : hcp).replace(',', '.');
     const gsm = cGsm >= 0 ? String(r[cGsm] || '').trim() : '';
-    out.push([nom, String(r[cMail]).trim(), hcp, gsm].join(';'));
+    let ne = cNe >= 0 ? r[cNe] : '';
+    if (ne instanceof Date) ne = ne.getFullYear() + '-' + String(ne.getMonth() + 1).padStart(2, '0') + '-' + String(ne.getDate()).padStart(2, '0');
+    else ne = String(ne || '').trim().split(' ')[0];
+    out.push([nom, String(r[cMail]).trim(), hcp, gsm, ne].join(';'));
   }
   return { lines: out, why: out.length ? '' : 'aucune ligne avec une adresse e-mail valide' };
 }
@@ -1047,7 +1123,7 @@ function readImportFile(f) {
   fr.onload = () => {
     let t = String(fr.result || '').replace(/^\uFEFF/, '');
     U.impTxt = t; U.impFile = f.name; U.impSheet = ''; U.impErr = ''; U.impLog = null;
-    if (!parseImport(t).some(r => !r.err)) U.impErr = 'Aucune ligne exploitable dans ce fichier. Format attendu : Nom ; e-mail ; handicap ; GSM.';
+    if (!parseImport(t).some(r => !r.err)) U.impErr = 'Aucune ligne exploitable dans ce fichier. Format attendu : Nom ; e-mail ; handicap ; GSM ; date de naissance.';
     render();
   };
   fr.onerror = () => { U.impErr = 'Lecture du fichier impossible.'; render(); };
@@ -1058,14 +1134,14 @@ function vImportBox() {
   if (!U.impOpen) return `<button class="btn dashed" data-a="openImport">Importer une liste de joueurs</button>`;
   const rows = parseImport(U.impTxt), ok = rows.filter(r => !r.err), ko = rows.filter(r => r.err);
   let h = `<div class="panel"><div class="t14" style="font-weight:800">Importer une liste de joueurs</div>
-  <div class="small">Une ligne par joueur : <b>Nom ; e-mail ; handicap ; GSM</b>. Le handicap et le GSM sont facultatifs. Les joueurs déjà présents sont ignorés.</div>
+  <div class="small">Une ligne par joueur : <b>Nom ; e-mail ; handicap ; GSM ; date de naissance</b>. Seuls le nom et l’e-mail sont obligatoires. Les joueurs déjà présents sont ignorés.</div>
   <div class="drop ${U.impOver ? 'over' : ''}" data-drop="1">
     <div style="font-weight:700">${U.impBusy && U.impFile ? 'Lecture de ' + esc(U.impFile) + '…' : U.impFile ? '📄 ' + esc(U.impFile) + (U.impSheet ? ' · feuille « ' + esc(U.impSheet) + ' »' : '') : 'Dépose ton fichier ici'}</div>
     <div class="small">${U.impFile ? 'Pour changer, dépose un autre fichier ou touche « Parcourir ».' : 'Fichier Excel (.xlsx), .csv ou .txt — ou colle la liste ci-dessous.'}</div>
     <button class="btn" data-a="pickFile">Parcourir…</button>
     <input type="file" accept=".txt,.csv,.xlsx,.xlsm,.xls,text/plain,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" data-file="1" style="display:none">
   </div>
-  <label class="f">Liste<textarea class="in" data-f="impTxt" data-rb="1" rows="7" style="font-family:monospace;font-size:12px" placeholder="Cédric Tedesco;cedric@exar.be;12.8;+32 476 28 53 19">${esc(U.impTxt || '')}</textarea></label>
+  <label class="f">Liste<textarea class="in" data-f="impTxt" data-rb="1" rows="7" style="font-family:monospace;font-size:12px" placeholder="Cédric Tedesco;cedric@exar.be;12.8;+32 476 28 53 19;14/03/1961">${esc(U.impTxt || '')}</textarea></label>
   <button class="btn ${U.impAcc ? 'sel' : ''}" data-a="impAcc" data-v="${U.impAcc ? 0 : 1}">${U.impAcc ? '☑' : '☐'} Créer aussi leur compte (mot de passe aléatoire)</button>`;
   if (rows.length) {
     h += `<div class="small" style="font-weight:700">${ok.length} joueur${ok.length > 1 ? 's' : ''} à importer${ko.length ? ` · ${ko.length} ligne${ko.length > 1 ? 's' : ''} ignorée${ko.length > 1 ? 's' : ''}` : ''}</div>`;
@@ -1351,7 +1427,7 @@ const A = {
   mFilter: v => { U.mFilter = v; render(); },
   backMatches: () => { U.view = U.prevView; if (U.prevView !== 'player') U.selPlayer = null; render(); },
   /* squad */
-  addMember: () => { U.mEdit = '__new'; U.created = null; U.mName = U.mEmail = U.mHcp = U.mPhone = U.mErr = ''; render(); },
+  addMember: () => { U.mEdit = '__new'; U.created = null; U.mName = U.mEmail = U.mHcp = U.mPhone = U.mBorn = U.mErr = ''; render(); },
   closeCreated: () => { U.created = null; render(); },
   createAccess: async k => {
     const m = S.team.members[k] || {}; if (!m.email) return;
@@ -1365,13 +1441,15 @@ const A = {
     render();
   },
   copyAccess: v => { const [email, pwd, name, tt] = v.split('|'); const m = accessMsg(name, email, pwd, tt); const txt = m.subject + '\n\n' + m.body; (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(() => toast('Message copié'), () => toast('Copie impossible sur cet appareil')); },
-  editMember: k => { const m = S.team.members[k] || {}; U.mEdit = k; U.mName = m.name || ''; U.mEmail = m.email || ''; U.mHcp = m.hcp || ''; U.mPhone = phoneOf(k); U.mErr = ''; render(); },
+  editMember: k => { const m = S.team.members[k] || {}; U.mEdit = k; U.mName = m.name || ''; U.mEmail = m.email || ''; U.mHcp = m.hcp || ''; U.mPhone = phoneOf(k); U.mBorn = bornOf(k); U.mErr = ''; render(); },
   cancelMember: () => { U.mEdit = null; render(); },
   saveMember: async () => {
     const name = (U.mName || '').trim(), hcp = (U.mHcp || '').trim().replace(',', '.');
     if (!name) { U.mErr = 'Indique le nom.'; return render(); }
     const phone = (U.mPhone || '').trim();
     if (!okPhone(phone)) { U.mErr = 'N° de GSM invalide.'; return render(); }
+    const born = toISODate(U.mBorn);
+    if (born === null || !validDate(born)) { U.mErr = 'Date de naissance invalide.'; return render(); }
     if (U.mEdit === '__new') {
       const email = (U.mEmail || '').trim().toLowerCase();
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { U.mErr = 'Adresse e-mail invalide.'; return render(); }
@@ -1381,8 +1459,9 @@ const A = {
       U.mErr = 'Création du compte…'; render();
       try {
         const r = await createAccount(email, name, pwd);
-        await updateDoc(doc(db, 'teams', S.teamId), { ['members.' + k]: { name, hcp, email }, memberKeys: arrayUnion(k) });
-        const ct = {}; if (phone) ct.phone = phone; if (r === 'created') ct.pwd = pwd;
+        const mb = { name, hcp, email }; if (born) mb.bd = born.slice(5);
+        await updateDoc(doc(db, 'teams', S.teamId), { ['members.' + k]: mb, memberKeys: arrayUnion(k) });
+        const ct = {}; if (phone) ct.phone = phone; if (born) ct.born = born; if (r === 'created') ct.pwd = pwd;
         if (Object.keys(ct).length) await setContact(k, ct);
         if (r === 'exists') await setContact(k, { hasAccount: true });
         U.mEdit = null; U.mErr = ''; U.created = { name, email, pwd, phone, exists: r === 'exists', key: k, tid: S.teamId };
@@ -1394,7 +1473,13 @@ const A = {
     } else {
       const k = U.mEdit; U.mEdit = null; render();
       const demo = S.team.members[k] && S.team.members[k].demo;
-      safe(async () => { await updateDoc(doc(db, 'teams', S.teamId), { ['members.' + k + '.name']: name, ['members.' + k + '.hcp']: hcp }); if (!demo && phone !== phoneOf(k)) await setPhone(k, phone); }, 'Enregistré');
+      safe(async () => {
+        const up = { ['members.' + k + '.name']: name, ['members.' + k + '.hcp']: hcp };
+        if (!demo) up['members.' + k + '.bd'] = born ? born.slice(5) : deleteField();
+        await updateDoc(doc(db, 'teams', S.teamId), up);
+        if (!demo && phone !== phoneOf(k)) await setPhone(k, phone);
+        if (!demo && born !== bornOf(k)) await setContact(k, { born });
+      }, 'Enregistré');
     }
   },
   removeMember: () => {
@@ -1451,9 +1536,11 @@ const A = {
           if (res === 'exists') { pwd = ''; state = 'ajouté · compte déjà existant'; }
           else state = 'ajouté · compte créé';
         }
-        await updateDoc(doc(db, 'teams', S.teamId), { ['members.' + k]: { name: r.name, hcp: r.hcp, email: r.email }, memberKeys: arrayUnion(k) });
+        const mb = { name: r.name, hcp: r.hcp, email: r.email }; if (r.born) mb.bd = r.born.slice(5);
+        await updateDoc(doc(db, 'teams', S.teamId), { ['members.' + k]: mb, memberKeys: arrayUnion(k) });
         const ct = {};
         if (r.phone) ct.phone = r.phone;
+        if (r.born) ct.born = r.born;
         if (pwd) ct.pwd = pwd;
         if (U.impAcc && !pwd) ct.hasAccount = true;
         if (Object.keys(ct).length) await setContact(k, ct);
