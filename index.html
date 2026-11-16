@@ -147,6 +147,7 @@ const TYPES = [
   { v: 'training', l: 'Entraînement', color: '#1D4ED8' },
   { v: 'lesson', l: 'Cours', color: '#B45309' },
   { v: 'matchplay', l: 'Match play', color: '#1E7A46' },
+  { v: 'friendly', l: 'Match amical', color: '#0891B2' },
   { v: 'course18', l: 'Parcours 18 trous', color: '#6D28D9' },
   { v: 'course9', l: 'Parcours 9 trous', color: '#A21CAF' },
   { v: 'meal', l: 'Repas', color: '#1F2937' },
@@ -158,7 +159,7 @@ const FILTERS = [
   { k: 'all', l: 'Tous' }, { k: 'ic', l: 'Interclubs' }, { k: 'mp', l: 'Match play' }, { k: 'course', l: 'Parcours' },
   { k: 'training', l: 'Entraînements' }, { k: 'lesson', l: 'Cours' }, { k: 'social', l: 'Social' }
 ];
-const FMAP = { ic: ['interclub'], mp: ['matchplay'], course: ['course18', 'course9'], training: ['training'], lesson: ['lesson'], social: ['meal', 'party', 'trip'] };
+const FMAP = { ic: ['interclub', 'friendly'], mp: ['matchplay'], course: ['course18', 'course9'], training: ['training'], lesson: ['lesson'], social: ['meal', 'party', 'trip'] };
 const M18 = ['1 up','2 up','2&1','3&1','3&2','4&2','4&3','5&3','5&4','6&4','6&5','7&5','7&6','8&6','8&7','9&7','9&8','10&8'];
 const M9 = ['1 up','2 up','2&1','3&1','3&2','4&2','4&3','5&3','5&4'];
 const ST = { yes: 'Présent', no: 'Absent', none: 'À répondre' };
@@ -181,9 +182,12 @@ const PWD_RE = /^(?=.*[A-Z])(?=.*[^A-Za-z0-9]).{8,}$/;
 const PWD_RULE = 'Au moins 8 caractères, dont 1 majuscule et 1 caractère spécial.';
 const K = email => String(email || '').trim().toLowerCase().replace(/\./g, ',');
 const typeOf = v => TYPES.find(t => t.v === v) || TYPES[1];
-const isGolf = t => ['matchplay', 'interclub', 'course18', 'course9'].includes(t);
+const isGolf = t => ['matchplay', 'interclub', 'friendly', 'course18', 'course9'].includes(t);
 const isCourse = t => t === 'course18' || t === 'course9';
-const isMPt = t => t === 'matchplay' || t === 'interclub';
+const isMPt = t => t === 'matchplay' || isTeamMatch(t);
+/* Interclub et match amical partagent toute leur mecanique :
+   adversaire, domicile/exterieur, parties et score d'equipe. */
+const isTeamMatch = t => t === 'interclub' || t === 'friendly';
 const holesOf = e => isCourse(e.type) ? (e.type === 'course18' ? 18 : 9) : (e.holes || 18);
 const pad = n => String(n).padStart(2, '0');
 const isoToday = () => { const d = new Date(); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); };
@@ -206,7 +210,7 @@ const timeText = e => !e.time ? '' : e.time + (e.end ? ' – ' + e.end : '');
 function typeText(e) {
   if (e.type === 'matchplay') return 'Match play ' + (e.format === 'foursome' ? 'foursome' : 'simple') + ' · ' + (e.holes || 18) + ' trous';
   if (isCourse(e.type)) return typeOf(e.type).l + ' · Stableford';
-  if (e.type === 'interclub') return 'Interclub · ' + (e.home === false ? 'extérieur' : 'domicile') + ' · ' + (e.holes || 18) + ' trous';
+  if (isTeamMatch(e.type)) return typeOf(e.type).l + ' · ' + (e.home === false ? 'extérieur' : 'domicile') + ' · ' + (e.holes || 18) + ' trous';
   return typeOf(e.type).l;
 }
 function rankRows(list, better) {
@@ -825,7 +829,7 @@ function vDetail(ev) {
 
 /* ---------- results ---------- */
 function vResults(ev) {
-  const mk = me(), cap = capView(), isIC = ev.type === 'interclub';
+  const mk = me(), cap = capView(), isIC = isTeamMatch(ev.type);
   let html = `<div class="top"><div><button class="back" data-a="backDetail">${ICON.back}Événement</button></div>
   <div style="display:flex;flex-direction:column;gap:4px"><h2>Résultats</h2><div class="t14">${esc(ev.title)}</div><div class="small">${esc(typeText(ev))} · ${longDate(ev.date)}</div></div></div>
   <div class="scroll" id="scroll" style="gap:14px">`;
@@ -914,12 +918,12 @@ function vAdd() {
   const f = U.f;
   const others = members().filter(p => p.k !== me());
   const opts = sel => `<option value="">Choisir…</option>` + others.map(p => `<option value="${esc(p.k)}" ${p.k === sel ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
-  const isMatch = f.type === 'matchplay', isIC = f.type === 'interclub';
+  const isMatch = f.type === 'matchplay', isIC = isTeamMatch(f.type);
   return `<div class="top"><div class="toprow"><button class="back" style="color:var(--mut)" data-a="backList">Annuler</button><div class="t15" style="font-weight:800">${cap ? 'Nouvel événement' : 'Nouvelle partie'}</div><button class="back" data-a="saveEvent">Créer</button></div></div>
   <div class="scroll" id="scroll" style="gap:16px">
   ${U.dup ? `<div class="small">Copie de « ${esc(U.f.title || typeOf(U.f.type).l)} » : choisis la nouvelle date. Les réponses et les résultats ne sont pas repris.</div>` : ''}
   <label class="f">Type<select class="in" data-f="f.type" data-r="1">${types.map(t => `<option value="${t.v}" ${t.v === f.type ? 'selected' : ''}>${t.l}</option>`).join('')}</select></label>
-  ${isIC ? `<label class="f">Club adverse<input class="in" data-f="f.club" value="${esc(f.club)}"></label>
+  ${isIC ? `<label class="f">${f.type === 'friendly' ? 'Équipe adverse' : 'Club adverse'}<input class="in" data-f="f.club" value="${esc(f.club)}"></label>
     <div class="row2"><button class="btn ${f.home !== false ? 'sel' : ''}" data-a="fset" data-v="home:1">Domicile</button><button class="btn ${f.home === false ? 'sel' : ''}" data-a="fset" data-v="home:0">Extérieur</button></div>` : ''}
   ${isMatch ? `<div class="f" style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:var(--ink2)">Formule<div class="row2"><button class="btn ${f.format !== 'foursome' ? 'sel' : ''}" data-a="fset" data-v="format:single">Simple</button><button class="btn ${f.format === 'foursome' ? 'sel' : ''}" data-a="fset" data-v="format:foursome">Foursome</button></div></div>` : ''}
   ${isMatch || isIC ? `<div class="f" style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:var(--ink2)">Nombre de trous<div class="row2"><button class="btn ${f.holes === 9 ? 'sel' : ''}" data-a="fset" data-v="holes:9">9 trous</button><button class="btn ${f.holes !== 9 ? 'sel' : ''}" data-a="fset" data-v="holes:18">18 trous</button></div></div>` : ''}
@@ -1374,8 +1378,8 @@ const A = {
     if (f.type === 'matchplay') { ev.format = f.format || 'single'; ev.holes = f.holes || 18; }
     if (isCourse(f.type)) ev.scoring = 'stableford';
     if (cap) {
-      if (f.type === 'interclub') {
-        const club = (f.club || '').trim(); if (!club) return err('Indique le club adverse.');
+      if (isTeamMatch(f.type)) {
+        const club = (f.club || '').trim(); if (!club) return err(f.type === 'friendly' ? 'Indique l’équipe adverse.' : 'Indique le club adverse.');
         Object.assign(ev, { club, home: f.home !== false, holes: f.holes || 18, format: 'mixed' });
         if (!ev.place) ev.place = ev.home ? 'Domicile' : 'Extérieur · ' + club;
         if (!ev.title) ev.title = 'VS ' + club;
@@ -1419,7 +1423,7 @@ const A = {
   closeAddParty: () => { U.addParty = false; render(); },
   npFour: v => { U.npFour = v === '1'; render(); },
   saveParty: () => {
-    const ev = getEv(U.sel), isIC = ev.type === 'interclub';
+    const ev = getEv(U.sel), isIC = isTeamMatch(ev.type);
     const four = isIC ? !!U.npFour : ev.format === 'foursome';
     const a = [U.npA1 || '']; if (four) a.push(U.npA2 || '');
     const err = m => { U.partyErr = m; render(); };
