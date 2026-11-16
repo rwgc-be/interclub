@@ -932,6 +932,11 @@ function vCreated(c) {
   <button class="btn" data-a="closeCreated">Fermer</button></div>`;
 }
 /* ---------- Import d'une liste de joueurs ---------- */
+const DROP_CSS = `.drop{border:2px dashed var(--line);border-radius:12px;padding:16px;display:flex;
+flex-direction:column;align-items:center;gap:6px;text-align:center;transition:.15s}
+.drop.over{border-color:var(--g);background:rgba(30,110,60,.07)}`;
+(function () { const st = document.createElement('style'); st.textContent = DROP_CSS; document.head.appendChild(st); })();
+
 function parseImport(txt) {
   const out = [], seen = {};
   String(txt || '').split(/\r?\n/).forEach((line, i) => {
@@ -950,11 +955,35 @@ function parseImport(txt) {
   });
   return out;
 }
+function readImportFile(f) {
+  if (!f) return;
+  if (/\.(xlsx|xls|ods|numbers)$/i.test(f.name)) {
+    U.impErr = 'Les fichiers Excel ne peuvent pas être lus ici. Ouvre-le et enregistre-le en CSV (Fichier → Enregistrer sous → CSV), ou copie-colle les lignes ci-dessous.';
+    return render();
+  }
+  if (f.size > 300000) { U.impErr = 'Fichier trop volumineux (max 300 Ko).'; return render(); }
+  const fr = new FileReader();
+  fr.onload = () => {
+    let t = String(fr.result || '').replace(/^\uFEFF/, '');
+    U.impTxt = t; U.impFile = f.name; U.impErr = ''; U.impLog = null;
+    if (!parseImport(t).some(r => !r.err)) U.impErr = 'Aucune ligne exploitable dans ce fichier. Format attendu : Nom ; e-mail ; handicap ; GSM.';
+    render();
+  };
+  fr.onerror = () => { U.impErr = 'Lecture du fichier impossible.'; render(); };
+  fr.readAsText(f, 'utf-8');
+}
+
 function vImportBox() {
   if (!U.impOpen) return `<button class="btn dashed" data-a="openImport">Importer une liste de joueurs</button>`;
   const rows = parseImport(U.impTxt), ok = rows.filter(r => !r.err), ko = rows.filter(r => r.err);
   let h = `<div class="panel"><div class="t14" style="font-weight:800">Importer une liste de joueurs</div>
   <div class="small">Une ligne par joueur : <b>Nom ; e-mail ; handicap ; GSM</b>. Le handicap et le GSM sont facultatifs. Les joueurs déjà présents sont ignorés.</div>
+  <div class="drop ${U.impOver ? 'over' : ''}" data-drop="1">
+    <div style="font-weight:700">${U.impFile ? '📄 ' + esc(U.impFile) : 'Dépose ton fichier ici'}</div>
+    <div class="small">${U.impFile ? 'Pour changer, dépose un autre fichier ou touche « Parcourir ».' : 'Fichier .txt ou .csv — ou colle la liste ci-dessous.'}</div>
+    <button class="btn" data-a="pickFile">Parcourir…</button>
+    <input type="file" accept=".txt,.csv,text/plain,text/csv" data-file="1" style="display:none">
+  </div>
   <label class="f">Liste<textarea class="in" data-f="impTxt" data-rb="1" rows="7" style="font-family:monospace;font-size:12px" placeholder="Cédric Tedesco;cedric@exar.be;12.8;+32 476 28 53 19">${esc(U.impTxt || '')}</textarea></label>
   <button class="btn ${U.impAcc ? 'sel' : ''}" data-a="impAcc" data-v="${U.impAcc ? 0 : 1}">${U.impAcc ? '☑' : '☐'} Créer aussi leur compte (mot de passe aléatoire)</button>`;
   if (rows.length) {
@@ -1322,7 +1351,8 @@ const A = {
   refuseReq: id => safe(() => deleteDoc(doc(db, 'requests', id)), 'Demande refusée'),
   /* import d'une liste */
   openImport: () => { U.impOpen = true; U.impTxt = U.impTxt || ''; U.impAcc = U.impAcc !== false; U.impLog = null; U.impErr = ''; render(); },
-  closeImport: () => { U.impOpen = false; U.impErr = ''; render(); },
+  closeImport: () => { U.impOpen = false; U.impErr = ''; U.impFile = ''; render(); },
+  pickFile: () => { const i = document.querySelector('[data-file]'); if (i) i.click(); },
   impAcc: v => { U.impAcc = !!Number(v); render(); },
   runImport: async () => {
     const el = document.querySelector('[data-f="impTxt"]');
@@ -1464,9 +1494,29 @@ root.addEventListener('change', e => {
     safe(() => updateDoc(evRef(U.sel), { ['scores.' + k]: has(v) ? v : deleteField() }));
     return;
   }
-  if (el.tagName === 'TEXTAREA' && el.dataset.rb) { setField(el); render(); return; }
+  if (el.dataset.file !== undefined) { readImportFile(el.files && el.files[0]); el.value = ''; return; }
+  if (el.tagName === 'TEXTAREA' && el.dataset.rb) { setField(el); U.impFile = ''; render(); return; }
   if (el.tagName === 'SELECT') setField(el);
 });
+['dragenter', 'dragover'].forEach(ev => root.addEventListener(ev, e => {
+  if (!e.target.closest('[data-drop]')) return;
+  e.preventDefault(); e.dataTransfer.dropEffect = 'copy';
+  if (!U.impOver) { U.impOver = true; render(); }
+}));
+root.addEventListener('dragleave', e => {
+  const z = e.target.closest('[data-drop]'); if (!z || z.contains(e.relatedTarget)) return;
+  if (U.impOver) { U.impOver = false; render(); }
+});
+root.addEventListener('drop', e => {
+  if (!e.target.closest('[data-drop]')) return;
+  e.preventDefault(); U.impOver = false;
+  readImportFile(e.dataTransfer.files && e.dataTransfer.files[0]);
+});
+/* Un fichier lache a cote de la zone ouvrirait le fichier dans l'onglet : on l'ignore. */
+['dragover', 'drop'].forEach(ev => window.addEventListener(ev, e => {
+  if (!e.target.closest || !e.target.closest('[data-drop]')) e.preventDefault();
+}));
+
 root.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.closest('.auth') && e.target.tagName === 'INPUT') A.authGo(); });
 render();
 </script>
