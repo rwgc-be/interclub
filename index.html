@@ -145,6 +145,7 @@ const JOURS_LONG = ['dimanche','lundi','mardi','mercredi','jeudi','vendredi','sa
 const TYPES = [
   { v: 'interclub', l: 'Interclub', color: '#0E7490' },
   { v: 'training', l: 'Entraînement', color: '#1D4ED8' },
+  { v: 'lesson', l: 'Cours', color: '#B45309' },
   { v: 'matchplay', l: 'Match play', color: '#1E7A46' },
   { v: 'course18', l: 'Parcours 18 trous', color: '#6D28D9' },
   { v: 'course9', l: 'Parcours 9 trous', color: '#A21CAF' },
@@ -157,7 +158,7 @@ const FILTERS = [
   { k: 'all', l: 'Tous' }, { k: 'ic', l: 'Interclubs' }, { k: 'mp', l: 'Match play' }, { k: 'course', l: 'Parcours' },
   { k: 'training', l: 'Entraînements' }, { k: 'social', l: 'Social' }
 ];
-const FMAP = { ic: ['interclub'], mp: ['matchplay'], course: ['course18', 'course9'], training: ['training'], social: ['meal', 'party', 'trip'] };
+const FMAP = { ic: ['interclub'], mp: ['matchplay'], course: ['course18', 'course9'], training: ['training', 'lesson'], social: ['meal', 'party', 'trip'] };
 const M18 = ['1 up','2 up','2&1','3&1','3&2','4&2','4&3','5&3','5&4','6&4','6&5','7&5','7&6','8&6','8&7','9&7','9&8','10&8'];
 const M9 = ['1 up','2 up','2&1','3&1','3&2','4&2','4&3','5&3','5&4'];
 const ST = { yes: 'Présent', no: 'Absent', none: 'À répondre' };
@@ -200,6 +201,8 @@ const yesCount = e => Object.values(e.r || {}).filter(v => v === 'yes').length;
 const isFull = e => !!e.max && yesCount(e) >= e.max;
 const groupOf = e => e.group ? S.events.filter(x => x.group === e.group).sort((a, b) => ((a.date || '') + (a.time || '')).localeCompare((b.date || '') + (b.time || ''))) : [];
 const slotLabel = e => shortDate(e.date) + (e.time ? ' · ' + e.time : '');
+/* Horaire : « 10:00 – 12:00 » si une fin est indiquee, sinon l'heure seule. */
+const timeText = e => !e.time ? '' : e.time + (e.end ? ' – ' + e.end : '');
 function typeText(e) {
   if (e.type === 'matchplay') return 'Match play ' + (e.format === 'foursome' ? 'foursome' : 'simple') + ' · ' + (e.holes || 18) + ' trous';
   if (isCourse(e.type)) return typeOf(e.type).l + ' · Stableford';
@@ -724,7 +727,7 @@ function vAgenda() {
       : (mine === 'yes' ? `<span class="pill yes">${ST.yes}</span>` : inOther ? `<span class="pill">Autre créneau</span>` : full ? `<span class="pill no">Complet</span>` : `<span class="pill ${mine}">${ST[mine]}</span>`);
     return `<button class="ev" data-a="open" data-v="${esc(e.id)}">
     <span class="tile" style="background:${typeOf(e.type).color}"><b>${d.getDate()}</b><span>${JOURS[d.getDay()]}</span></span>
-    <span class="grow"><span class="t15 ell">${esc(e.title)}</span><span class="small ell">${e.free ? 'Partie libre · ' : ''}${esc(typeText(e))}${e.time ? ' · ' + esc(e.time) : ''}${e.max ? ' · max ' + e.max : ''}${e.group ? ' · créneau lié' : ''}</span></span>${right}</button>`;
+    <span class="grow"><span class="t15 ell">${esc(e.title)}</span><span class="small ell">${e.free ? 'Partie libre · ' : ''}${esc(typeText(e))}${e.time ? ' · ' + esc(timeText(e)) : ''}${e.max ? ' · max ' + e.max : ''}${e.group ? ' · créneau lié' : ''}</span></span>${right}</button>`;
   };
   const groups = gs => gs.map(g => `<div class="month">${g.month}</div>${g.items.map(item).join('')}`).join('');
   const now = new Date();
@@ -796,7 +799,7 @@ function vDetail(ev) {
   <div style="display:flex;flex-direction:column;gap:8px">
     <span class="badge" style="background:${t.color}">${esc(typeText(ev))}</span>
     <h2>${esc(ev.title)}</h2>
-    <div class="sub" style="font-weight:500">${longDate(ev.date)}${ev.time ? ' · ' + esc(ev.time) : ''}</div>
+    <div class="sub" style="font-weight:500">${longDate(ev.date)}${ev.time ? ' · ' + esc(timeText(ev)) : ''}</div>
     ${ev.place ? `<div class="sub" style="font-weight:500">${esc(ev.place)}</div>` : ''}
     ${ev.free ? `<div style="font-size:13px;font-weight:700;color:var(--or)">Partie libre · organisée par ${esc(nameOf(ev.org))}</div>` : ''}
     ${ev.notes ? `<div class="small">${esc(ev.notes)}</div>` : ''}
@@ -813,6 +816,7 @@ function vDetail(ev) {
     <div class="list">${rows.map(x => `<div class="li"><div class="av">${esc(initials(nameOf(x.k)))}</div><div class="grow t14" style="font-weight:600">${esc(nameOf(x.k))}${x.k === mk ? ' (toi)' : ''}</div>
       ${canSet ? `<button class="pill ${x.v} click" data-a="cycle" data-v="${esc(x.k)}" aria-label="Changer la présence de ${esc(nameOf(x.k))}">${ST[x.v]}</button>` : `<span class="pill ${x.v}">${ST[x.v]}</span>`}</div>`).join('') || '<div class="li small">Aucun joueur.</div>'}</div>
   </div>
+  ${canDelete ? `<button class="btn" data-a="dupEvent">Dupliquer à une autre date</button>` : ''}
   ${canDelete ? (U.confirmDel ? `<div class="card" style="background:var(--redl);border-color:#E8C9C3"><div class="t14" style="color:var(--red)">Supprimer définitivement ?</div><div class="flex"><button class="btn" data-a="confirmDel" data-v="0">Annuler</button><button class="btn" style="background:var(--red);border-color:var(--red);color:#fff" data-a="doDelete">Supprimer</button></div></div>`
     : `<button class="btn danger" data-a="confirmDel" data-v="1">${ev.free ? 'Supprimer la partie' : 'Supprimer l’événement'}</button>`)
     : (ev.free && cap ? '<div class="small center">Seul l’organisateur peut supprimer cette partie.</div>' : '')}
@@ -913,6 +917,7 @@ function vAdd() {
   const isMatch = f.type === 'matchplay', isIC = f.type === 'interclub';
   return `<div class="top"><div class="toprow"><button class="back" style="color:var(--mut)" data-a="backList">Annuler</button><div class="t15" style="font-weight:800">${cap ? 'Nouvel événement' : 'Nouvelle partie'}</div><button class="back" data-a="saveEvent">Créer</button></div></div>
   <div class="scroll" id="scroll" style="gap:16px">
+  ${U.dup ? `<div class="small">Copie de « ${esc(U.f.title || typeOf(U.f.type).l)} » : choisis la nouvelle date. Les réponses et les résultats ne sont pas repris.</div>` : ''}
   <label class="f">Type<select class="in" data-f="f.type" data-r="1">${types.map(t => `<option value="${t.v}" ${t.v === f.type ? 'selected' : ''}>${t.l}</option>`).join('')}</select></label>
   ${isIC ? `<label class="f">Club adverse<input class="in" data-f="f.club" value="${esc(f.club)}"></label>
     <div class="row2"><button class="btn ${f.home !== false ? 'sel' : ''}" data-a="fset" data-v="home:1">Domicile</button><button class="btn ${f.home === false ? 'sel' : ''}" data-a="fset" data-v="home:0">Extérieur</button></div>` : ''}
@@ -922,7 +927,8 @@ function vAdd() {
   ${!cap && isMatch && f.format === 'foursome' ? `<label class="f">Ton partenaire<select class="in" data-f="f.partner">${opts(f.partner)}</select></label><div class="row2"><label class="f">Adversaire 1<select class="in" data-f="f.opp1">${opts(f.opp1)}</select></label><label class="f">Adversaire 2<select class="in" data-f="f.opp2">${opts(f.opp2)}</select></label></div>` : ''}
   ${!cap && !isMatch ? `<div class="f" style="display:flex;flex-direction:column;gap:8px;font-size:13px;font-weight:700;color:var(--ink2)">Joueurs invités (max. 3)<div class="chiplist">${others.map(p => `<button class="chip2 ${(f.guests || []).includes(p.k) ? 'on' : ''}" data-a="guest" data-v="${esc(p.k)}">${esc(p.name)}</button>`).join('')}</div></div>` : ''}
   <label class="f">${cap && !isIC ? 'Intitulé' : 'Intitulé (facultatif)'}<input class="in" data-f="f.title" value="${esc(f.title)}"></label>
-  <div class="row2"><label class="f">Date<input class="in" type="date" data-f="f.date" value="${esc(f.date)}"></label><label class="f">Heure<input class="in" type="time" data-f="f.time" value="${esc(f.time)}"></label></div>
+  <label class="f">Date<input class="in" type="date" data-f="f.date" value="${esc(f.date)}"></label>
+  <div class="row2"><label class="f">Heure${f.end ? ' de début' : ''}<input class="in" type="time" data-f="f.time" value="${esc(f.time)}"></label><label class="f">Fin (facultatif)<input class="in" type="time" data-f="f.end" value="${esc(f.end)}"></label></div>
   ${cap ? `<label class="f">Nombre maximum de joueurs (facultatif)<input class="in" type="number" min="1" inputmode="numeric" data-f="f.max" value="${esc(f.max)}" placeholder="illimité"></label>
   <div style="display:flex;flex-direction:column;gap:8px"><div style="font-size:13px;font-weight:700;color:var(--ink2)">Créneaux liés (facultatif)</div>
   ${(f.slots || []).map((sl, i) => `<div class="flex" style="align-items:center"><input class="in" type="date" data-f="slot.${i}.date" value="${esc(sl.date)}" aria-label="Date du créneau ${i + 2}"><input class="in" type="time" data-f="slot.${i}.time" value="${esc(sl.time)}" aria-label="Heure du créneau ${i + 2}"><button class="mini" style="flex:0 0 34px" data-a="delSlot" data-v="${i}" aria-label="Retirer ce créneau">✕</button></div>`).join('')}
@@ -1277,7 +1283,8 @@ function vAdmin() {
 
 /* ---------- actions ---------- */
 function resetForm() {
-  U.f = { max: '', slots: [], type: capView() ? 'interclub' : 'matchplay', format: 'single', holes: 18, home: true, club: '', title: '', date: '', time: '', place: '', notes: '', opp1: '', opp2: '', partner: '', guests: [] };
+  U.dup = false;
+  U.f = { max: '', slots: [], type: capView() ? 'interclub' : 'matchplay', format: 'single', holes: 18, home: true, club: '', title: '', date: '', time: '', end: '', place: '', notes: '', opp1: '', opp2: '', partner: '', guests: [] };
   U.fErr = '';
 }
 const A = {
@@ -1310,6 +1317,26 @@ const A = {
   backDetail: () => { U.view = 'detail'; U.pEdit = null; U.addParty = false; U.xEdit = null; render(); },
   openResults: () => { U.view = 'results'; U.pEdit = null; U.addParty = false; U.xEdit = null; render(); },
   openAdd: () => { resetForm(); U.view = 'add'; render(); },
+  /* Duplication : on reprend la definition de l'evenement, jamais les
+     reponses, les scores ni les parties. La date est laissee vide. */
+  dupEvent: () => {
+    const ev = S.events.find(e => e.id === U.sel); if (!ev) return;
+    resetForm();
+    Object.assign(U.f, {
+      type: ev.type, title: ev.title || '', date: '', time: ev.time || '', end: ev.end || '',
+      place: ev.place || '', notes: ev.notes || '', max: ev.max || '',
+      format: ev.format === 'foursome' ? 'foursome' : 'single', holes: ev.holes || 18,
+      home: ev.home !== false, club: ev.club || '', slots: []
+    });
+    if (ev.free) {
+      U.f.guests = (ev.invited || []).filter(k => k !== me());
+      if (ev.sideA) {   // match play entre joueurs : on reprend les adversaires
+        U.f.partner = (ev.sideA || []).find(k => k !== me()) || '';
+        U.f.opp1 = (ev.sideB || [])[0] || ''; U.f.opp2 = (ev.sideB || [])[1] || '';
+      }
+    }
+    U.view = 'add'; U.dup = true; U.fErr = ''; render();
+  },
   setMine: v => {
     const k = me(), id = U.sel, ev = getEv(id);
     if (v === 'no' || !ev.max) return safe(() => updateDoc(evRef(id), { ['r.' + k]: v }));
@@ -1339,7 +1366,10 @@ const A = {
     const f = U.f, cap = capView(), mk = me();
     const err = m => { U.fErr = m; render(); };
     if (!f.date) return err('La date est obligatoire.');
+    if (f.end && !f.time) return err('Indique l’heure de début avant l’heure de fin.');
+    if (f.end && f.time && f.end <= f.time) return err('L’heure de fin doit être après l’heure de début.');
     const ev = { type: f.type, title: (f.title || '').trim(), date: f.date, time: f.time || '', place: (f.place || '').trim(), r: {}, createdBy: mk, createdAt: Date.now() };
+    if (f.end) ev.end = f.end;
     if (f.notes) ev.notes = f.notes.trim();
     if (f.type === 'matchplay') { ev.format = f.format || 'single'; ev.holes = f.holes || 18; }
     if (isCourse(f.type)) ev.scoring = 'stableford';
