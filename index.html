@@ -1,4 +1,28 @@
 <!doctype html>
+<!--
+================================================================================
+  INTERCLUB — Application de gestion d'équipe interclubs
+
+  © 2026 Francis Berlier — Tous droits réservés
+
+  Conçu pour le Royal Waterloo Golf Club (RWGC).
+
+  ⚠️  AVERTISSEMENT LÉGAL
+
+  Ce logiciel est protégé par le droit d'auteur belge et européen
+  (Livre XI du Code de droit économique, Directive 2009/24/CE).
+
+  Toute reproduction, distribution, modification, adaptation, traduction,
+  rétro-ingénierie ou utilisation hors du cadre du RWGC est INTERDITE
+  sans autorisation écrite préalable de l'auteur.
+
+  Le code source visible via le navigateur reste la propriété exclusive
+  de son auteur. Sa lecture n'autorise aucune utilisation autre que
+  l'exécution normale de l'application.
+
+  Contact : francisBerlier@gmail.com
+================================================================================
+-->
 <html lang="fr">
 <head>
 <meta charset="utf-8">
@@ -135,7 +159,7 @@ const firebaseConfig = {
 };
 // Administrateurs (création des équipes et des capitaines). Même liste que dans firestore.rules.
 const ADMINS = ["francisberlier@gmail.com"];
-const VERSION = "v3.3";   // a incrementer a chaque publication
+const VERSION = "v3.6";   // a incrementer a chaque publication
 /* ========================================================= */
 
 const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -527,12 +551,25 @@ function render() {
   document.title = S.team ? (S.team.title || ('Interclub ' + (S.team.name || ''))) : 'Interclub';
   lastViewKey = key;
   const sc2 = document.getElementById('scroll');
+  // Ecrans ordinaires : en fin de zone defilante. Connexion et chargement :
+  // en bas du bloc .auth, qui n'a pas de zone defilante.
+  const host = sc2 || root.querySelector('.auth');
+  if (host) host.insertAdjacentHTML('beforeend', LEGAL);
   if (sc2 && keep !== null) sc2.scrollTop = keep;
   if (U.todayScroll && U.tab === 'agenda' && U.view === 'list') {
     const mark = document.getElementById('today-mark');
     if (sc2 && mark) { sc2.scrollTop = mark.offsetTop - sc2.offsetTop - 4; U.todayScroll = false; }
   }
 }
+
+/* Mention legale, ajoutee en bas de chaque ecran par render(). */
+const LEGAL = '<div class="legal">© 2026 Francis Berlier — Interclub · Tous droits réservés · Usage réservé au RWGC</div>';
+(function () {
+  const st = document.createElement('style');
+  st.textContent = '.legal{padding:16px 12px 6px;text-align:center;font-size:10px;line-height:1.5;' +
+    'letter-spacing:.2px;color:var(--mut);opacity:.7}';
+  document.head.appendChild(st);
+})();
 
 function view() {
   if (!configured) return `<div class="auth"><div class="logo">Interclub</div><div class="card"><div class="t15">Configuration manquante</div><div class="small">Colle la configuration Firebase dans le fichier index.html (bloc CONFIGURATION), puis recharge la page.</div></div></div>`;
@@ -940,8 +977,8 @@ function vAdd() {
   <div class="scroll" id="scroll" style="gap:16px">
   ${U.edit ? `<div class="small">Les réponses des joueurs et les résultats déjà saisis sont conservés.${!cap ? ' Les joueurs de la partie ne sont pas modifiables ici.' : ''}</div>` : ''}
   ${U.dup ? `<div class="small">Copie de « ${esc(U.f.title || typeOf(U.f.type).l)} » : choisis la nouvelle date. Les réponses et les résultats ne sont pas repris.</div>` : ''}
-  ${U.edit ? `<div class="small">Type : <b>${esc(typeOf(f.type).l)}</b> — non modifiable, crée un nouvel événement pour en changer.</div>`
-    : `<label class="f">Type<select class="in" data-f="f.type" data-r="1">${types.map(t => `<option value="${t.v}" ${t.v === f.type ? 'selected' : ''}>${t.l}</option>`).join('')}</select></label>`}
+  <label class="f">Type<select class="in" data-f="f.type" data-r="1">${types.map(t => `<option value="${t.v}" ${t.v === f.type ? 'selected' : ''}>${t.l}</option>`).join('')}</select></label>
+  ${U.edit && U.editType && f.type !== U.editType ? `<div class="small" style="color:var(--or);font-weight:700">Type changé : ${esc(typeOf(U.editType).l)} → ${esc(typeOf(f.type).l)}.${evHasResults(getEv(U.edit)) ? ' Les résultats déjà saisis seront masqués tant que ce type est actif ; ils réapparaissent si tu reviens en arrière.' : ''}</div>` : ''}
   ${isIC ? `<label class="f">${f.type === 'friendly' ? 'Équipe adverse' : 'Club adverse'}<input class="in" data-f="f.club" value="${esc(f.club)}"></label>
     <div class="row2"><button class="btn ${f.home !== false ? 'sel' : ''}" data-a="fset" data-v="home:1">Domicile</button><button class="btn ${f.home === false ? 'sel' : ''}" data-a="fset" data-v="home:0">Extérieur</button></div>` : ''}
   ${isMatch ? `<div class="f" style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:var(--ink2)">Formule<div class="row2"><button class="btn ${f.format !== 'foursome' ? 'sel' : ''}" data-a="fset" data-v="format:single">Simple</button><button class="btn ${f.format === 'foursome' ? 'sel' : ''}" data-a="fset" data-v="format:foursome">Foursome</button></div></div>` : ''}
@@ -986,7 +1023,8 @@ function vSquad() {
     const isNew = U.mEdit === '__new';
     html += `<div class="panel"><div class="t14" style="font-weight:800">${isNew ? 'Ajouter un joueur' : 'Modifier ' + esc(nameOf(U.mEdit))}</div>
     <label class="f">Prénom et nom<input class="in" data-f="mName" value="${esc(U.mName)}"></label>
-    ${isNew ? `<label class="f">E-mail (sera son identifiant)<input class="in" type="email" inputmode="email" data-f="mEmail" value="${esc(U.mEmail)}"></label><div class="small">Un mot de passe aléatoire est créé automatiquement.</div>` : `<div class="small">Identifiant : <b>${esc(U.mEmail)}</b></div>`}
+    ${isNew ? `<label class="f">E-mail (sera son identifiant)<input class="in" type="email" inputmode="email" data-f="mEmail" value="${esc(U.mEmail)}"></label><div class="small">Un mot de passe aléatoire est créé automatiquement.</div>` : `<label class="f">E-mail (son identifiant)<input class="in" type="email" inputmode="email" data-f="mEmail" data-rb="1" value="${esc(U.mEmail)}"></label>
+      ${U.mEmail && K(U.mEmail) !== U.mEdit ? `<div class="small" style="color:var(--or);font-weight:700">Changement d’identifiant : ${esc((S.team.members[U.mEdit] || {}).email || U.mEdit)} → ${esc(U.mEmail.trim().toLowerCase())}.${accessState(U.mEdit) === 'none' ? ' Ce joueur n’a pas encore de compte : rien d’autre à faire.' : ' Son compte de connexion garde l’ancienne adresse : il faudra lui recréer un accès après l’enregistrement, et supprimer l’ancien compte dans Firebase.'}</div>` : ''}`}
     <label class="f">Handicap<input class="in" inputmode="decimal" data-f="mHcp" value="${esc(U.mHcp)}"></label>
     <label class="f">Date de naissance<input class="in" type="date" data-f="mBorn" value="${esc(U.mBorn)}" max="${new Date().toISOString().slice(0, 10)}"></label>
     ${U.mBorn && ageOf(U.mBorn) !== null ? `<div class="small">${ageOf(U.mBorn)} ans${daysToBirthday(U.mBorn) === 0 ? ' · c’est son anniversaire aujourd’hui 🎂' : daysToBirthday(U.mBorn) <= 30 ? ' · anniversaire dans ' + daysToBirthday(U.mBorn) + ' jour' + (daysToBirthday(U.mBorn) > 1 ? 's' : '') : ''}</div>` : ''}
@@ -1309,6 +1347,55 @@ function vAdmin() {
 /* Remplit le formulaire a partir d'un evenement existant : seule sa
    definition, jamais les reponses, scores, parties ni creneaux lies.
    Sert a la modification comme a la duplication. */
+/* Un evenement porte-t-il deja des resultats ? Sert a prevenir avant
+   un changement de type qui les rendrait invisibles. */
+function evHasResults(ev) {
+  if (!ev) return false;
+  if ((ev.parties || []).some(p => p.outcome)) return true;
+  if (Object.values(ev.scores || {}).some(v => v !== '' && v !== null && v !== undefined)) return true;
+  return Object.keys(ev.extra || {}).length > 0;
+}
+
+/* L'e-mail est la cle du joueur : le changer deplace members, memberKeys,
+   captains, sa fiche de contact et sa trace dans chaque evenement
+   (reponses, scores, stats, parties, invites, organisateur). Tout part
+   en un seul writeBatch : soit l'ensemble passe, soit rien. */
+function renameKey(oldK, newK) {
+  const b = writeBatch(db), T = S.team;
+  const m = Object.assign({}, T.members[oldK] || {});
+  m.email = String(newK).replace(/,/g, '.');
+  const tref = doc(db, 'teams', S.teamId);
+  const up = { ['members.' + oldK]: deleteField(), ['members.' + newK]: m,
+               memberKeys: (T.memberKeys || []).map(k => k === oldK ? newK : k) };
+  if ((T.captains || []).includes(oldK)) up.captains = T.captains.map(k => k === oldK ? newK : k);
+  b.update(tref, up);
+  const ct = S.contacts[oldK];
+  if (ct) {
+    const copy = Object.assign({}, ct); delete copy.id;
+    b.set(doc(db, 'teams', S.teamId, 'contacts', newK), copy);
+    b.delete(doc(db, 'teams', S.teamId, 'contacts', oldK));
+  }
+  let touched = 0;
+  (S.events || []).forEach(ev => {
+    const u = {};
+    ['r', 'scores', 'extra'].forEach(f => {
+      if (ev[f] && Object.prototype.hasOwnProperty.call(ev[f], oldK)) {
+        const o = Object.assign({}, ev[f]); o[newK] = o[oldK]; delete o[oldK]; u[f] = o;
+      }
+    });
+    const swap = a => (a || []).map(k => k === oldK ? newK : k);
+    if ((ev.invited || []).includes(oldK)) u.invited = swap(ev.invited);
+    if ((ev.sideA || []).includes(oldK)) u.sideA = swap(ev.sideA);
+    if ((ev.sideB || []).includes(oldK)) u.sideB = swap(ev.sideB);
+    if (ev.org === oldK) u.org = newK;
+    if (ev.createdBy === oldK) u.createdBy = newK;
+    if ((ev.parties || []).some(pt => (pt.a || []).includes(oldK) || (pt.b || []).includes(oldK)))
+      u.parties = ev.parties.map(pt => Object.assign({}, pt, { a: swap(pt.a), b: Array.isArray(pt.b) ? swap(pt.b) : pt.b }));
+    if (Object.keys(u).length) { b.update(evRef(ev.id), u); touched++; }
+  });
+  return b.commit().then(() => touched);
+}
+
 function fillForm(ev) {
   resetForm();
   Object.assign(U.f, {
@@ -1327,7 +1414,7 @@ function fillForm(ev) {
 }
 
 function resetForm() {
-  U.dup = false; U.edit = null;
+  U.dup = false; U.edit = null; U.editType = null;
   U.f = { max: '', slots: [], type: capView() ? 'interclub' : 'matchplay', format: 'single', holes: 18, home: true, club: '', title: '', date: '', time: '', end: '', place: '', notes: '', opp1: '', opp2: '', partner: '', guests: [] };
   U.fErr = '';
 }
@@ -1366,7 +1453,7 @@ const A = {
   editEvent: () => {
     const ev = S.events.find(e => e.id === U.sel); if (!ev) return;
     fillForm(ev); U.f.date = ev.date || '';
-    U.edit = ev.id; U.dup = false; U.view = 'add'; U.fErr = ''; render();
+    U.edit = ev.id; U.editType = ev.type; U.dup = false; U.view = 'add'; U.fErr = ''; render();
   },
   dupEvent: () => {
     const ev = S.events.find(e => e.id === U.sel); if (!ev) return;
@@ -1435,7 +1522,7 @@ const A = {
       const id = U.edit;
       const up = { type: ev.type, title: ev.title, date: ev.date, time: ev.time, place: ev.place };
       ['end', 'notes', 'max', 'format', 'holes', 'club', 'scoring'].forEach(k => { up[k] = ev[k] !== undefined ? ev[k] : deleteField(); });
-      if (isTeamMatch(ev.type)) up.home = ev.home;
+      up.home = isTeamMatch(ev.type) ? ev.home : deleteField();
       U.edit = null; U.view = 'detail'; render();
       return safe(() => updateDoc(evRef(id), up), 'Événement modifié');
     }
@@ -1548,6 +1635,24 @@ const A = {
     } else {
       const k = U.mEdit; U.mEdit = null; render();
       const demo = S.team.members[k] && S.team.members[k].demo;
+      const newK = K(U.mEmail || '');
+      if (!demo && newK && newK !== k) {
+        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test((U.mEmail || '').trim())) { U.mErr = 'Adresse e-mail invalide.'; return render(); }
+        if ((S.team.memberKeys || []).includes(newK)) { U.mErr = 'Cette adresse est déjà celle d’un autre joueur de l’effectif.'; return render(); }
+        const had = accessState(k) !== 'none';
+        U.mEdit = null; render();
+        return safe(async () => {
+          const touched = await renameKey(k, newK);
+          const up2 = {}; if (name !== (S.team.members[k] || {}).name) up2['members.' + newK + '.name'] = name;
+          up2['members.' + newK + '.hcp'] = hcp;
+          up2['members.' + newK + '.bd'] = born ? born.slice(5) : deleteField();
+          await updateDoc(doc(db, 'teams', S.teamId), up2);
+          if (phone) await setContact(newK, { phone });
+          if (born) await setContact(newK, { born });
+          toast('Adresse modifiée' + (touched ? ' · ' + touched + ' événement' + (touched > 1 ? 's' : '') + ' mis à jour' : '') +
+                (had ? ' · accès à recréer' : ''));
+        }, '');
+      }
       safe(async () => {
         const up = { ['members.' + k + '.name']: name, ['members.' + k + '.hcp']: hcp };
         if (!demo) up['members.' + k + '.bd'] = born ? born.slice(5) : deleteField();
@@ -1739,6 +1844,7 @@ root.addEventListener('change', e => {
   }
   if (el.dataset.file !== undefined) { readImportFile(el.files && el.files[0]); el.value = ''; return; }
   if (el.tagName === 'TEXTAREA' && el.dataset.rb) { setField(el); U.impFile = ''; U.impSheet = ''; render(); return; }
+  if (el.tagName === 'INPUT' && el.dataset.rb) { setField(el); render(); return; }
   if (el.tagName === 'SELECT') setField(el);
 });
 ['dragenter', 'dragover'].forEach(ev => root.addEventListener(ev, e => {
