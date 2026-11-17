@@ -159,7 +159,7 @@ const firebaseConfig = {
 };
 // Administrateurs (création des équipes et des capitaines). Même liste que dans firestore.rules.
 const ADMINS = ["francisberlier@gmail.com"];
-const VERSION = "v4.2";   // a incrementer a chaque publication
+const VERSION = "v4.5";   // a incrementer a chaque publication
 /* ========================================================= */
 
 const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -197,6 +197,8 @@ function ink(hex) {
   return (1.05 / (L + 0.05)) >= ((L + 0.05) / 0.05) ? '#fff' : '#111';
 }
 const PLAYER_TYPES = ['matchplay', 'course18', 'course9'];
+/* Les deux parcours du club ; 'Autre' laisse la main a un lieu libre. */
+const TERRAINS = ['La Marache', 'Le Lion'];
 const FILTERS = [
   { k: 'all', l: 'Tous' }, { k: 'ic', l: 'Interclubs' }, { k: 'friendly', l: 'Amicaux' }, { k: 'mp', l: 'Match play' }, { k: 'cal', l: 'Échéances' }, { k: 'course', l: 'Parcours' },
   { k: 'training', l: 'Entraînements' }, { k: 'lesson', l: 'Cours' }, { k: 'social', l: 'Social' }
@@ -798,6 +800,7 @@ function vAgenda() {
   const now = new Date();
   return vHeader('Agenda', 'openAdd', cap ? 'Ajouter un événement' : 'Organiser une partie')
     + (vInstall() ? `<div style="padding:0 16px 6px">${vInstall()}</div>` : '')
+    + vCalls()
     + `<div class="chips">${FILTERS.map(f => `<button class="chip ${U.agFilter === f.k ? 'on' : ''}" data-a="filter" data-v="${f.k}">${f.l}</button>`).join('')}</div>
     <div class="scroll" id="scroll" style="gap:8px">
     ${!evs.length ? `<div class="small center" style="padding:24px">Aucun événement${U.agFilter !== 'all' ? ' de ce type' : ''}.</div>` : ''}
@@ -826,6 +829,33 @@ const STAR = '<span class="star" title="Événement important" aria-label="Évé
 (function () {
   const st = document.createElement('style');
   st.textContent = '.star{color:var(--red);font-size:17px;line-height:1;flex-shrink:0;margin-right:2px}';
+  document.head.appendChild(st);
+})();
+/* Propositions ouvertes, a venir, auxquelles je n'ai pas encore repondu. */
+function openCalls() {
+  const mk = me(), today = new Date().toISOString().slice(0, 10);
+  return (S.events || [])
+    .filter(e => e.open && e.date >= today && e.org !== mk
+      && (e.invited || []).includes(mk) && !((e.r || {})[mk]))
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+function vCalls() {
+  const list = openCalls(); if (!list.length) return '';
+  const n = list.length, show = list.slice(0, 3);
+  return `<div class="calls"><div class="t14" style="font-weight:800">${n} proposition${n > 1 ? 's' : ''} de partie</div>
+  ${show.map(e => `<button class="callrow" data-a="open" data-v="${esc(e.id)}">
+    <span class="grow"><span style="font-weight:700">${esc(shortDate(e.date))}${e.time ? ' · ' + esc(timeText(e)) : ''}</span>
+    <span class="small">${esc(typeOf(e.type).l)} · ${esc(nameOf(e.org))}${e.place ? ' · ' + esc(e.place) : ''}</span></span>${ICON.chev}</button>`).join('')}
+  ${n > 3 ? `<div class="small">et ${n - 3} autre${n - 3 > 1 ? 's' : ''} plus bas dans l’agenda</div>` : ''}</div>`;
+}
+(function () {
+  const st = document.createElement('style');
+  st.textContent = '.calls{margin:0 16px 8px;padding:12px 14px;border-radius:16px;background:var(--orl);' +
+    'border:1px solid rgba(180,110,20,.35);display:flex;flex-direction:column;gap:8px}' +
+    '.calls .t14{color:var(--or)}' +
+    '.callrow{display:flex;align-items:center;gap:8px;width:100%;text-align:left;font:inherit;cursor:pointer;' +
+    'background:#fff;border:1px solid var(--line);border-radius:12px;padding:8px 10px}' +
+    '.callrow .grow{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0}';
   document.head.appendChild(st);
 })();
 const joinFr = a => a.length < 2 ? (a[0] || '') : a.slice(0, -1).join(', ') + ' et ' + a[a.length - 1];
@@ -1028,21 +1058,30 @@ function vAdd() {
     <div class="row2"><button class="btn ${f.home !== false ? 'sel' : ''}" data-a="fset" data-v="home:1">Domicile</button><button class="btn ${f.home === false ? 'sel' : ''}" data-a="fset" data-v="home:0">Extérieur</button></div>` : ''}
   ${isMatch ? `<div class="f" style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:var(--ink2)">Formule<div class="row2"><button class="btn ${f.format !== 'foursome' ? 'sel' : ''}" data-a="fset" data-v="format:single">Simple</button><button class="btn ${f.format === 'foursome' ? 'sel' : ''}" data-a="fset" data-v="format:foursome">Foursome</button></div></div>` : ''}
   ${isMatch || isIC ? `<div class="f" style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:var(--ink2)">Nombre de trous<div class="row2"><button class="btn ${f.holes === 9 ? 'sel' : ''}" data-a="fset" data-v="holes:9">9 trous</button><button class="btn ${f.holes !== 9 ? 'sel' : ''}" data-a="fset" data-v="holes:18">18 trous</button></div></div>` : ''}
-  ${!cap && !U.edit && isMatch ? `<div class="f" style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:var(--ink2)">Avec qui ?<div class="row2"><button class="btn ${!f.open ? 'sel' : ''}" data-a="fset" data-v="open:0">Adversaire choisi</button><button class="btn ${f.open ? 'sel' : ''}" data-a="fset" data-v="open:1">Appel à tous</button></div>
-    ${f.open ? '<div class="small" style="font-weight:600">Ta proposition est visible de tout l’effectif. Les intéressés se manifestent, puis tu composes les parties.</div>' : ''}</div>` : ''}
+  ${!cap && !U.edit ? `<div class="f" style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:var(--ink2)">Avec qui ?<div class="row2"><button class="btn ${!f.open ? 'sel' : ''}" data-a="fset" data-v="open:0">${isMatch ? 'Adversaire choisi' : 'Joueurs choisis'}</button><button class="btn ${f.open ? 'sel' : ''}" data-a="fset" data-v="open:1">Appel à tous</button></div>
+    ${f.open ? `<div class="small" style="font-weight:600">Tu annonces ta disponibilité : la proposition est visible de tout l’effectif, et les intéressés répondent « Je participe ».${isMatch ? ' Tu composes ensuite les parties.' : ''}</div>` : ''}</div>` : ''}
   ${!cap && !U.edit && isMatch && !f.open && f.format !== 'foursome' ? `<label class="f">Adversaire<select class="in" data-f="f.opp1">${opts(f.opp1)}</select></label>` : ''}
   ${!cap && !U.edit && isMatch && !f.open && f.format === 'foursome' ? `<label class="f">Ton partenaire<select class="in" data-f="f.partner">${opts(f.partner)}</select></label><div class="row2"><label class="f">Adversaire 1<select class="in" data-f="f.opp1">${opts(f.opp1)}</select></label><label class="f">Adversaire 2<select class="in" data-f="f.opp2">${opts(f.opp2)}</select></label></div>` : ''}
-  ${!cap && !U.edit && !isMatch ? `<div class="f" style="display:flex;flex-direction:column;gap:8px;font-size:13px;font-weight:700;color:var(--ink2)">Joueurs invités (max. 3)<div class="chiplist">${others.map(p => `<button class="chip2 ${(f.guests || []).includes(p.k) ? 'on' : ''}" data-a="guest" data-v="${esc(p.k)}">${esc(p.name)}</button>`).join('')}</div></div>` : ''}
+  ${!cap && !U.edit && !isMatch && !f.open ? `<div class="f" style="display:flex;flex-direction:column;gap:8px;font-size:13px;font-weight:700;color:var(--ink2)">Joueurs invités (max. 3)
+    ${[0, 1, 2].map(i => {
+      const g = f.guests || [], pris = g.filter((_, j) => j !== i);
+      return `<select class="in" data-f="guest.${i}" data-r="1" aria-label="Invité ${i + 1}"><option value="">${i ? 'Autre joueur (facultatif)' : 'Choisir un joueur…'}</option>${
+        others.filter(p => !pris.includes(p.k)).map(p => `<option value="${esc(p.k)}" ${p.k === g[i] ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>`;
+    }).join('')}</div>` : ''}
   <label class="f">${cap && !isIC ? 'Intitulé' : 'Intitulé (facultatif)'}<input class="in" data-f="f.title" value="${esc(f.title)}"></label>
   <label class="f">Date<input class="in" type="date" data-f="f.date" value="${esc(f.date)}"></label>
-  <div class="row2"><label class="f">Heure${f.end ? ' de début' : ''}<input class="in" type="time" data-f="f.time" value="${esc(f.time)}"></label><label class="f">Fin (facultatif)<input class="in" type="time" data-f="f.end" value="${esc(f.end)}"></label></div>
+  <div class="row2"><label class="f">${f.open ? 'Départ à partir de' : 'Heure' + (f.end ? ' de début' : '')}<input class="in" type="time" data-f="f.time" value="${esc(f.time)}"></label><label class="f">${f.open ? 'Jusqu’à (facultatif)' : 'Fin (facultatif)'}<input class="in" type="time" data-f="f.end" value="${esc(f.end)}"></label></div>
+  ${f.open && f.time ? `<div class="small">Tu es disponible pour un départ ${f.end ? 'entre ' + esc(f.time) + ' et ' + esc(f.end) : 'à partir de ' + esc(f.time)}.</div>` : ''}
   ${cap && !U.edit ? `<label class="f">Nombre maximum de joueurs (facultatif)<input class="in" type="number" min="1" inputmode="numeric" data-f="f.max" value="${esc(f.max)}" placeholder="illimité"></label>
   <div style="display:flex;flex-direction:column;gap:8px"><div style="font-size:13px;font-weight:700;color:var(--ink2)">Créneaux liés (facultatif)</div>
   ${(f.slots || []).map((sl, i) => `<div class="flex" style="align-items:center"><input class="in" type="date" data-f="slot.${i}.date" value="${esc(sl.date)}" aria-label="Date du créneau ${i + 2}"><input class="in" type="time" data-f="slot.${i}.time" value="${esc(sl.time)}" aria-label="Heure du créneau ${i + 2}"><button class="mini" style="flex:0 0 34px" data-a="delSlot" data-v="${i}" aria-label="Retirer ce créneau">✕</button></div>`).join('')}
   <button class="btn dashed" data-a="addSlot">+ Ajouter un créneau lié</button>
   ${(f.slots || []).length ? '<div class="small">Chaque créneau devient un événement avec le même maximum. Un joueur ne peut s’inscrire qu’à un seul.</div>' : ''}</div>`
     : cap ? `<label class="f">Nombre maximum de joueurs (facultatif)<input class="in" type="number" min="1" inputmode="numeric" data-f="f.max" value="${esc(f.max)}" placeholder="illimité"></label>` : ''}
-  <label class="f">Lieu<input class="in" data-f="f.place" value="${esc(f.place)}"></label>
+  <label class="f">${isIC ? 'Lieu' : 'Terrain'}<select class="in" data-f="f.terr" data-r="1">${
+    TERRAINS.map(t => `<option value="${esc(t)}" ${f.place === t ? 'selected' : ''}>${esc(t)}</option>`).join('')
+  }<option value="" ${TERRAINS.includes(f.place) ? '' : 'selected'}>Autre lieu…</option></select></label>
+  ${TERRAINS.includes(f.place) ? '' : `<input class="in" data-f="f.place" value="${esc(f.place)}" placeholder="${isIC ? 'Club ou parcours' : 'Préciser le lieu'}" aria-label="Lieu">`}
   ${cap ? `<label class="f">Remarque (facultatif)<input class="in" data-f="f.notes" value="${esc(f.notes)}"></label>` : ''}
   ${U.fErr ? `<div class="err">${esc(U.fErr)}</div>` : ''}
   <div class="small">${cap ? 'Tout l’effectif est convoqué et confirme sa participation.' : 'Seuls les joueurs choisis sont invités. Le résultat comptera dans les stats.'}</div>
@@ -1563,12 +1602,12 @@ const A = {
       if (!ev.title) return err('Indique un intitulé.');
     } else {
       Object.assign(ev, { free: true, org: mk }); ev.r[mk] = 'yes';
-      if (f.type === 'matchplay' && f.open) {
+      if (f.open) {
         // Appel ouvert : pas d'adversaire designe, tout l'effectif est invite.
         ev.open = true;
         ev.invited = (S.team.memberKeys || []).slice();
         ev.r = { [mk]: 'yes' };
-        if (!ev.title) ev.title = 'Match play · ' + (S.team.members[mk] || {}).name;
+        if (!ev.title) ev.title = typeOf(f.type).l + ' · ' + (S.team.members[mk] || {}).name;
       }
       else if (f.type === 'matchplay' && ev.format === 'single') { if (!f.opp1) return err('Choisis ton adversaire.'); ev.sideA = [mk]; ev.sideB = [f.opp1]; }
       else if (f.type === 'matchplay') {
@@ -1902,6 +1941,11 @@ function setField(el) {
   if (f === 'teamPick') { U.titleEdit = false; S.teamId = el.value; U.view = 'list'; U.todayScroll = true; subscribeTeam(); render(); return; }
   if (f === 'tiTheme') { U.tiTheme = el.value; U.tiMsg = ((S.team && S.team.themeMsgs) || {})[el.value] || ''; render(); return; }
   if (f.startsWith('slot.')) { const [, i, key] = f.split('.'); U.f.slots[Number(i)][key] = el.value; }
+  else if (f === 'f.terr') { U.f.place = el.value; }
+  else if (f.startsWith('guest.')) {
+    const i = Number(f.split('.')[1]), g = (U.f.guests || []).slice();
+    g[i] = el.value; U.f.guests = g.filter(Boolean);
+  }
   else if (f.startsWith('f.')) U.f[f.slice(2)] = el.value; else U[f] = el.value;
   if (el.dataset.r) render();
 }
