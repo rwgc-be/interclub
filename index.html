@@ -159,7 +159,7 @@ const firebaseConfig = {
 };
 // Administrateurs (création des équipes et des capitaines). Même liste que dans firestore.rules.
 const ADMINS = ["francisberlier@gmail.com"];
-const VERSION = "v4.0";   // a incrementer a chaque publication
+const VERSION = "v4.2";   // a incrementer a chaque publication
 /* ========================================================= */
 
 const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -792,7 +792,7 @@ function vAgenda() {
       : (mine === 'yes' ? `<span class="pill yes">${ST.yes}</span>` : inOther ? `<span class="pill">Autre créneau</span>` : full ? `<span class="pill no">Complet</span>` : `<span class="pill ${mine}">${ST[mine]}</span>`);
     return `<button class="ev" data-a="open" data-v="${esc(e.id)}">
     <span class="tile" style="background:${typeOf(e.type).color};color:${ink(typeOf(e.type).color)}"><span>${JOURS[d.getDay()]}</span><b>${d.getDate()}</b><span>${MOIS_C[d.getMonth()].replace('.', '').toUpperCase()}</span></span>
-    <span class="grow"><span class="t15 ell">${esc(e.title)}</span><span class="small ell">${e.free ? 'Partie libre · ' : ''}${esc(typeText(e))}${e.time ? ' · ' + esc(timeText(e)) : ''}${e.max ? ' · max ' + e.max : ''}${e.group ? ' · créneau lié' : ''}</span></span>${right}</button>`;
+    <span class="grow"><span class="t15 ell">${esc(e.title)}</span><span class="small ell">${e.open ? 'Appel à tous · ' : e.free ? 'Partie libre · ' : ''}${esc(typeText(e))}${e.time ? ' · ' + esc(timeText(e)) : ''}${e.max ? ' · max ' + e.max : ''}${e.group ? ' · créneau lié' : ''}</span></span>${e.imp ? STAR : ''}${right}</button>`;
   };
   const groups = gs => gs.map(g => `<div class="month">${g.month}</div>${g.items.map(item).join('')}`).join('');
   const now = new Date();
@@ -820,6 +820,14 @@ function vBirthday(now) {
   else txt = 'Joyeux anniversaire à ' + joinFr(autres) + ' ! 🎂';
   return `<div class="bday">${esc(txt)}</div>`;
 }
+/* Marquage des evenements importants : une etoile rouge, posee par le
+   capitaine, visible de tous a cote du compteur d'inscrits. */
+const STAR = '<span class="star" title="Événement important" aria-label="Événement important">★</span>';
+(function () {
+  const st = document.createElement('style');
+  st.textContent = '.star{color:var(--red);font-size:17px;line-height:1;flex-shrink:0;margin-right:2px}';
+  document.head.appendChild(st);
+})();
 const joinFr = a => a.length < 2 ? (a[0] || '') : a.slice(0, -1).join(', ') + ' et ' + a[a.length - 1];
 
 /* ---------- detail ---------- */
@@ -863,10 +871,11 @@ function vDetail(ev) {
   <div class="scroll" id="scroll" style="gap:18px">
   <div style="display:flex;flex-direction:column;gap:8px">
     <span class="badge" style="background:${t.color};color:${ink(t.color)}">${esc(typeText(ev))}</span>
-    <h2>${esc(ev.title)}</h2>
+    <h2>${ev.imp ? STAR + ' ' : ''}${esc(ev.title)}</h2>
     <div class="sub" style="font-weight:500">${longDate(ev.date)}${ev.time ? ' · ' + esc(timeText(ev)) : ''}</div>
     ${ev.place ? `<div class="sub" style="font-weight:500">${esc(ev.place)}</div>` : ''}
-    ${ev.free ? `<div style="font-size:13px;font-weight:700;color:var(--or)">Partie libre · organisée par ${esc(nameOf(ev.org))}</div>` : ''}
+    ${ev.free ? `<div style="font-size:13px;font-weight:700;color:var(--or)">${ev.open ? 'Appel à tous' : 'Partie libre'} · organisé${ev.open ? '' : 'e'} par ${esc(nameOf(ev.org))}</div>` : ''}
+    ${ev.open && ev.org === mk ? '<div class="small">Les joueurs intéressés répondent « Je participe ». Compose ensuite les parties dans Résultats.</div>' : ''}
     ${ev.notes ? `<div class="small">${esc(ev.notes)}</div>` : ''}
   </div>
   ${ev.free && ev.sideA ? `<div class="card vs"><div class="t14 center">${ev.sideA.map(k => esc(nameOf(k))).join('<br>')}</div><div class="small" style="font-weight:800">VS</div><div class="t14 center">${ev.sideB.map(k => esc(nameOf(k))).join('<br>')}</div></div>` : ''}
@@ -881,6 +890,7 @@ function vDetail(ev) {
     <div class="list">${rows.map(x => `<div class="li"><div class="av">${esc(initials(nameOf(x.k)))}</div><div class="grow t14" style="font-weight:600">${esc(nameOf(x.k))}${x.k === mk ? ' (toi)' : ''}</div>
       ${canSet ? `<button class="pill ${x.v} click" data-a="cycle" data-v="${esc(x.k)}" aria-label="Changer la présence de ${esc(nameOf(x.k))}">${ST[x.v]}</button>` : `<span class="pill ${x.v}">${ST[x.v]}</span>`}</div>`).join('') || '<div class="li small">Aucun joueur.</div>'}</div>
   </div>
+  ${cap && !ev.free ? `<button class="btn ${ev.imp ? 'sel' : ''}" data-a="toggleImp">${ev.imp ? '★ Retirer l’importance' : '☆ Marquer comme important'}</button>` : ''}
   ${canDelete ? `<div class="row2"><button class="btn" data-a="editEvent">Modifier</button><button class="btn" data-a="dupEvent">Dupliquer</button></div>` : ''}
   ${canDelete ? (U.confirmDel ? `<div class="card" style="background:var(--redl);border-color:#E8C9C3"><div class="t14" style="color:var(--red)">Supprimer définitivement ?</div><div class="flex"><button class="btn" data-a="confirmDel" data-v="0">Annuler</button><button class="btn" style="background:var(--red);border-color:var(--red);color:#fff" data-a="doDelete">Supprimer</button></div></div>`
     : `<button class="btn danger" data-a="confirmDel" data-v="1">${ev.free ? 'Supprimer la partie' : 'Supprimer l’événement'}</button>`)
@@ -936,18 +946,20 @@ function vResults(ev) {
       ${U.pOut !== 'half' ? `<label class="f">Écart<select class="in" data-f="pMargin">${M.map(m => `<option ${m === U.pMargin ? 'selected' : ''}>${m}</option>`).join('')}</select></label>` : ''}
       <div class="flex"><button class="btn" data-a="cancelParty">Annuler</button><button class="btn primary" data-a="saveResult">Valider</button></div></div>`;
     }
-    if (cap && !ev.free && !ep) {
+    if (((cap && !ev.free) || (ev.open && ev.org === mk)) && !ep) {
       if (!U.addParty) html += `<button class="btn dashed" data-a="openAddParty">${isIC ? '+ Ajouter un départ' : '+ Ajouter une partie'}</button>`;
       else {
         const pres = members().filter(p => (ev.r || {})[p.k] === 'yes');
         const poolP = pres.length ? pres : members();
+        const openSelf = ev.open && ev.org === mk;
         const four = isIC ? !!U.npFour : ev.format === 'foursome';
         const opts = sel => `<option value="">Choisir…</option>` + poolP.map(p => `<option value="${esc(p.k)}" ${p.k === sel ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
         html += `<div class="panel"><div class="t14" style="font-weight:800">${isIC ? 'Départ n°' + (P.length + 1) : four ? 'Nouveau foursome' : 'Nouveau simple'}</div>
         ${isIC ? `<div class="row2"><button class="btn ${!four ? 'sel' : ''}" data-a="npFour" data-v="0">Simple</button><button class="btn ${four ? 'sel' : ''}" data-a="npFour" data-v="1">Foursome</button></div>` : ''}
         <label class="f">Notre joueur<select class="in" data-f="npA1">${opts(U.npA1)}</select></label>
         ${four ? `<label class="f">Son partenaire<select class="in" data-f="npA2">${opts(U.npA2)}</select></label>` : ''}
-        <label class="f">${isIC ? 'Adversaire (facultatif)' : 'Adversaire(s)'}<input class="in" data-f="npB" value="${esc(U.npB)}" placeholder="Nom de l’adversaire"></label>
+        ${openSelf ? `<label class="f">Son adversaire<select class="in" data-f="npB2">${opts(U.npB2)}</select></label>`
+          : `<label class="f">${isIC ? 'Adversaire (facultatif)' : 'Adversaire(s)'}<input class="in" data-f="npB" value="${esc(U.npB)}" placeholder="Nom de l’adversaire"></label>`}
         ${U.partyErr ? `<div class="err">${esc(U.partyErr)}</div>` : ''}
         <div class="flex"><button class="btn" data-a="closeAddParty">Annuler</button><button class="btn primary" data-a="saveParty">Ajouter</button></div></div>`;
       }
@@ -1016,8 +1028,10 @@ function vAdd() {
     <div class="row2"><button class="btn ${f.home !== false ? 'sel' : ''}" data-a="fset" data-v="home:1">Domicile</button><button class="btn ${f.home === false ? 'sel' : ''}" data-a="fset" data-v="home:0">Extérieur</button></div>` : ''}
   ${isMatch ? `<div class="f" style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:var(--ink2)">Formule<div class="row2"><button class="btn ${f.format !== 'foursome' ? 'sel' : ''}" data-a="fset" data-v="format:single">Simple</button><button class="btn ${f.format === 'foursome' ? 'sel' : ''}" data-a="fset" data-v="format:foursome">Foursome</button></div></div>` : ''}
   ${isMatch || isIC ? `<div class="f" style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:var(--ink2)">Nombre de trous<div class="row2"><button class="btn ${f.holes === 9 ? 'sel' : ''}" data-a="fset" data-v="holes:9">9 trous</button><button class="btn ${f.holes !== 9 ? 'sel' : ''}" data-a="fset" data-v="holes:18">18 trous</button></div></div>` : ''}
-  ${!cap && !U.edit && isMatch && f.format !== 'foursome' ? `<label class="f">Adversaire<select class="in" data-f="f.opp1">${opts(f.opp1)}</select></label>` : ''}
-  ${!cap && !U.edit && isMatch && f.format === 'foursome' ? `<label class="f">Ton partenaire<select class="in" data-f="f.partner">${opts(f.partner)}</select></label><div class="row2"><label class="f">Adversaire 1<select class="in" data-f="f.opp1">${opts(f.opp1)}</select></label><label class="f">Adversaire 2<select class="in" data-f="f.opp2">${opts(f.opp2)}</select></label></div>` : ''}
+  ${!cap && !U.edit && isMatch ? `<div class="f" style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:var(--ink2)">Avec qui ?<div class="row2"><button class="btn ${!f.open ? 'sel' : ''}" data-a="fset" data-v="open:0">Adversaire choisi</button><button class="btn ${f.open ? 'sel' : ''}" data-a="fset" data-v="open:1">Appel à tous</button></div>
+    ${f.open ? '<div class="small" style="font-weight:600">Ta proposition est visible de tout l’effectif. Les intéressés se manifestent, puis tu composes les parties.</div>' : ''}</div>` : ''}
+  ${!cap && !U.edit && isMatch && !f.open && f.format !== 'foursome' ? `<label class="f">Adversaire<select class="in" data-f="f.opp1">${opts(f.opp1)}</select></label>` : ''}
+  ${!cap && !U.edit && isMatch && !f.open && f.format === 'foursome' ? `<label class="f">Ton partenaire<select class="in" data-f="f.partner">${opts(f.partner)}</select></label><div class="row2"><label class="f">Adversaire 1<select class="in" data-f="f.opp1">${opts(f.opp1)}</select></label><label class="f">Adversaire 2<select class="in" data-f="f.opp2">${opts(f.opp2)}</select></label></div>` : ''}
   ${!cap && !U.edit && !isMatch ? `<div class="f" style="display:flex;flex-direction:column;gap:8px;font-size:13px;font-weight:700;color:var(--ink2)">Joueurs invités (max. 3)<div class="chiplist">${others.map(p => `<button class="chip2 ${(f.guests || []).includes(p.k) ? 'on' : ''}" data-a="guest" data-v="${esc(p.k)}">${esc(p.name)}</button>`).join('')}</div></div>` : ''}
   <label class="f">${cap && !isIC ? 'Intitulé' : 'Intitulé (facultatif)'}<input class="in" data-f="f.title" value="${esc(f.title)}"></label>
   <label class="f">Date<input class="in" type="date" data-f="f.date" value="${esc(f.date)}"></label>
@@ -1440,7 +1454,7 @@ function fillForm(ev) {
     type: ev.type, title: ev.title || '', date: '', time: ev.time || '', end: ev.end || '',
     place: ev.place || '', notes: ev.notes || '', max: ev.max || '',
     format: ev.format === 'foursome' ? 'foursome' : 'single', holes: ev.holes || 18,
-    home: ev.home !== false, club: ev.club || '', slots: []
+    home: ev.home !== false, club: ev.club || '', slots: [], imp: !!ev.imp
   });
   if (ev.free) {
     U.f.guests = (ev.invited || []).filter(k => k !== me());
@@ -1453,7 +1467,7 @@ function fillForm(ev) {
 
 function resetForm() {
   U.dup = false; U.edit = null; U.editType = null;
-  U.f = { max: '', slots: [], type: capView() ? 'interclub' : 'matchplay', format: 'single', holes: 18, home: true, club: '', title: '', date: '', time: '', end: '', place: '', notes: '', opp1: '', opp2: '', partner: '', guests: [] };
+  U.f = { max: '', slots: [], type: capView() ? 'interclub' : 'matchplay', format: 'single', holes: 18, home: true, club: '', title: '', date: '', time: '', end: '', place: '', notes: '', imp: false, opp1: '', opp2: '', partner: '', guests: [] };
   U.fErr = '';
 }
 const A = {
@@ -1518,6 +1532,11 @@ const A = {
   addSlot: () => { U.f.slots = (U.f.slots || []).concat([{ date: U.f.date || '', time: '' }]); render(); },
   delSlot: i => { U.f.slots.splice(Number(i), 1); render(); },
   cycle: k => { const ev0 = getEv(U.sel); if (ev0.max && ((ev0.r || {})[k] || 'none') === 'none' && isFull(ev0)) toast('Attention : maximum dépassé (' + ev0.max + ')'); const ev = ev0; const v = (ev.r || {})[k] || 'none'; const n = v === 'none' ? 'yes' : v === 'yes' ? 'no' : 'none'; safe(() => updateDoc(evRef(U.sel), { ['r.' + k]: n === 'none' ? deleteField() : n })); },
+  toggleImp: () => {
+    const ev = getEv(U.sel); if (!ev) return;
+    safe(() => updateDoc(evRef(U.sel), { imp: ev.imp ? deleteField() : true }),
+      ev.imp ? 'Marquage retiré' : 'Marqué comme important');
+  },
   confirmDel: v => { U.confirmDel = v === '1'; render(); },
   doDelete: () => { const id = U.sel; U.view = 'list'; U.sel = null; U.confirmDel = false; render(); safe(() => deleteDoc(evRef(id)), 'Événement supprimé'); },
   fset: v => { const [k, x] = v.split(':'); U.f[k] = k === 'home' ? x === '1' : k === 'holes' ? Number(x) : x; render(); },
@@ -1530,6 +1549,7 @@ const A = {
     if (f.end && f.time && f.end <= f.time) return err('L’heure de fin doit être après l’heure de début.');
     const ev = { type: f.type, title: (f.title || '').trim(), date: f.date, time: f.time || '', place: (f.place || '').trim(), r: {}, createdBy: mk, createdAt: Date.now() };
     if (f.end) ev.end = f.end;
+    if (f.imp) ev.imp = true;
     if (f.notes) ev.notes = f.notes.trim();
     if (f.type === 'matchplay' || f.type === 'redtide') { ev.format = f.format || 'single'; ev.holes = f.holes || 18; }
     if (isCourse(f.type)) ev.scoring = 'stableford';
@@ -1543,14 +1563,21 @@ const A = {
       if (!ev.title) return err('Indique un intitulé.');
     } else {
       Object.assign(ev, { free: true, org: mk }); ev.r[mk] = 'yes';
-      if (f.type === 'matchplay' && ev.format === 'single') { if (!f.opp1) return err('Choisis ton adversaire.'); ev.sideA = [mk]; ev.sideB = [f.opp1]; }
+      if (f.type === 'matchplay' && f.open) {
+        // Appel ouvert : pas d'adversaire designe, tout l'effectif est invite.
+        ev.open = true;
+        ev.invited = (S.team.memberKeys || []).slice();
+        ev.r = { [mk]: 'yes' };
+        if (!ev.title) ev.title = 'Match play · ' + (S.team.members[mk] || {}).name;
+      }
+      else if (f.type === 'matchplay' && ev.format === 'single') { if (!f.opp1) return err('Choisis ton adversaire.'); ev.sideA = [mk]; ev.sideB = [f.opp1]; }
       else if (f.type === 'matchplay') {
         const four = [f.partner, f.opp1, f.opp2];
         if (four.includes('')) return err('Choisis ton partenaire et les 2 adversaires.');
         if (new Set(four).size < 3) return err('Un même joueur est choisi deux fois.');
         ev.sideA = [mk, f.partner]; ev.sideB = [f.opp1, f.opp2];
-      } else if (!(f.guests || []).length) return err('Invite au moins 1 joueur.');
-      ev.invited = ev.sideA ? ev.sideA.concat(ev.sideB) : [mk].concat(f.guests);
+      } else if (!f.open && !(f.guests || []).length) return err('Invite au moins 1 joueur.');
+      if (!ev.open) ev.invited = ev.sideA ? ev.sideA.concat(ev.sideB) : [mk].concat(f.guests);
       if (!ev.title) ev.title = ev.sideA ? names(ev.sideA) + ' vs ' + names(ev.sideB) : typeOf(f.type).l + ' entre amis';
     }
     if (cap && has(f.max)) { const m = parseInt(f.max, 10); if (!(m >= 1)) return err('Nombre maximum invalide.'); ev.max = m; }
@@ -1559,7 +1586,7 @@ const A = {
       // group, invited et sideA/sideB restent intacts.
       const id = U.edit;
       const up = { type: ev.type, title: ev.title, date: ev.date, time: ev.time, place: ev.place };
-      ['end', 'notes', 'max', 'format', 'holes', 'club', 'scoring'].forEach(k => { up[k] = ev[k] !== undefined ? ev[k] : deleteField(); });
+      ['end', 'notes', 'max', 'format', 'holes', 'club', 'scoring', 'imp'].forEach(k => { up[k] = ev[k] !== undefined ? ev[k] : deleteField(); });
       up.home = isTeamMatch(ev.type) ? ev.home : deleteField();
       U.edit = null; U.view = 'detail'; render();
       return safe(() => updateDoc(evRef(id), up), 'Événement modifié');
@@ -1585,19 +1612,26 @@ const A = {
     U.pEdit = null; render();
     safe(() => updateDoc(evRef(ev.id), { parties: P }), 'Résultat enregistré');
   },
-  openAddParty: () => { U.addParty = true; U.npA1 = U.npA2 = U.npB = ''; U.npFour = false; U.partyErr = ''; render(); },
+  openAddParty: () => { U.addParty = true; U.npA1 = U.npA2 = U.npB = U.npB2 = ''; U.npFour = false; U.partyErr = ''; render(); },
   closeAddParty: () => { U.addParty = false; render(); },
   npFour: v => { U.npFour = v === '1'; render(); },
   saveParty: () => {
     const ev = getEv(U.sel), isIC = isTeamMatch(ev.type);
+    const openSelf = ev.open && ev.org === me();
     const four = isIC ? !!U.npFour : ev.format === 'foursome';
     const a = [U.npA1 || '']; if (four) a.push(U.npA2 || '');
     const err = m => { U.partyErr = m; render(); };
-    if (a.includes('') || (!isIC && !(U.npB || '').trim())) return err(isIC ? 'Choisis le(s) joueur(s).' : 'Choisis le(s) joueur(s) et indique l’adversaire.');
+    if (openSelf) {
+      if (!a[0] || !U.npB2) return err('Choisis les deux joueurs.');
+      if (a.includes(U.npB2)) return err('Le même joueur est choisi des deux côtés.');
+      const pris = (ev.parties || []).flatMap(q => [...(q.a || []), ...(Array.isArray(q.b) ? q.b : [])]);
+      if (a.some(k => pris.includes(k)) || pris.includes(U.npB2)) return err('Un de ces joueurs a déjà une partie.');
+    }
+    else if (a.includes('') || (!isIC && !(U.npB || '').trim())) return err(isIC ? 'Choisis le(s) joueur(s).' : 'Choisis le(s) joueur(s) et indique l’adversaire.');
     if (a.length === 2 && a[0] === a[1]) return err('Le même joueur est choisi deux fois.');
     const used = (ev.parties || []).flatMap(q => q.a || []);
     if (isIC && a.some(k => used.includes(k))) return err('Ce joueur a déjà un départ dans cette rencontre.');
-    const b = isIC ? ev.club + ((U.npB || '').trim() ? ' · ' + U.npB.trim() : '') : U.npB.trim();
+    const b = openSelf ? [U.npB2] : isIC ? ev.club + ((U.npB || '').trim() ? ' · ' + U.npB.trim() : '') : U.npB.trim();
     const np = { a, b }; if (isIC) np.four = four;
     U.addParty = false; render();
     safe(() => updateDoc(evRef(ev.id), { parties: (ev.parties || []).concat([np]) }));
