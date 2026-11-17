@@ -159,7 +159,7 @@ const firebaseConfig = {
 };
 // Administrateurs (création des équipes et des capitaines). Même liste que dans firestore.rules.
 const ADMINS = ["francisberlier@gmail.com"];
-const VERSION = "v3.6";   // a incrementer a chaque publication
+const VERSION = "v3.9";   // a incrementer a chaque publication
 /* ========================================================= */
 
 const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -470,7 +470,8 @@ function setContact(k, data, tid) { return setDoc(doc(db, 'teams', tid || S.team
 /* ---------- stats ---------- */
 function computeStats() {
   const S2 = {};
-  members().forEach(p => { S2[p.k] = { mpS: { w: 0, h: 0, l: 0 }, mpF: { w: 0, h: 0, l: 0 }, pts: 0, n: 0, stab18: [], stab9: [], yes: 0, conv: 0, hist: [], mp: [], put: { putts: 0, holes: 0, rounds: 0, udOk: 0, udTry: 0, sOk: 0, sTry: 0, girOk: 0, girHoles: 0 } }; });
+  members().forEach(p => { S2[p.k] = { mpS: { w: 0, h: 0, l: 0 }, mpF: { w: 0, h: 0, l: 0 }, pts: 0, n: 0, stab18: [], stab9: [], yes: 0, conv: 0, hist: [], mp: [], put: { putts: 0, holes: 0, rounds: 0, udOk: 0, udTry: 0, sOk: 0, sTry: 0, girOk: 0, girHoles: 0 },
+      pb: { pars: 0, birdies: 0, rounds: 0 } }; });
   const sorted = S.events.slice().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
   sorted.forEach(ev => {
     const memberKeys = (S.team && S.team.memberKeys) || [];
@@ -479,6 +480,11 @@ function computeStats() {
       if (inv) { S2[k].conv++; if (ev.r && ev.r[k] === 'yes') S2[k].yes++; }
     });
     if (isMPt(ev.type)) {
+      Object.entries(ev.extra || {}).forEach(([k, e]) => {
+        const B = S2[k] && S2[k].pb; if (!B || !e) return;
+        if (!has(e.pars) && !has(e.birdies)) return;
+        B.pars += Number(e.pars || 0); B.birdies += Number(e.birdies || 0); B.rounds++;
+      });
       const parties = ev.parties || (ev.sideA ? [{ a: ev.sideA, b: ev.sideB }] : []);
       parties.forEach(pt => {
         if (!pt.outcome) return;
@@ -881,6 +887,16 @@ function vDetail(ev) {
   </div>`;
 }
 
+/* Nos joueurs engages dans les parties d'un match : pour la saisie des
+   pars et birdies, qui n'existe que sur les matchs. */
+function matchKeys(ev) {
+  const P = ev.parties || (ev.sideA ? [{ a: ev.sideA, b: ev.sideB }] : []);
+  const mine = (S.team && S.team.memberKeys) || [], seen = [];
+  P.forEach(pt => [...(pt.a || []), ...(Array.isArray(pt.b) ? pt.b : [])]
+    .forEach(k => { if (mine.includes(k) && !seen.includes(k)) seen.push(k); }));
+  return seen;
+}
+
 /* ---------- results ---------- */
 function vResults(ev) {
   const mk = me(), cap = capView(), isIC = isTeamMatch(ev.type);
@@ -889,6 +905,7 @@ function vResults(ev) {
   <div class="scroll" id="scroll" style="gap:14px">`;
   if (isMPt(ev.type)) {
     const P = ev.parties || (ev.sideA ? [{ a: ev.sideA, b: ev.sideB }] : []);
+    const inParty = pt => [...(pt.a || []), ...(Array.isArray(pt.b) ? pt.b : [])].includes(mk);
     const canRes = ev.free ? (ev.invited || []).includes(mk) : cap;
     let won = 0, lost = 0, any = false;
     const cards = P.map((pt, i) => {
@@ -903,13 +920,13 @@ function vResults(ev) {
         ${cap ? `<button class="mini" data-a="move" data-v="${i}:-1" aria-label="Monter">${ICON.up}</button><button class="mini" data-a="move" data-v="${i}:1" aria-label="Descendre">${ICON.down}</button>` : ''}</div>` : ''}
       <div class="vs"><div class="t14" style="font-size:13px">${esc(aT)}</div><div class="small" style="font-weight:800">VS</div><div class="t14" style="font-size:13px;text-align:right">${esc(bT)}</div></div>
       <div class="toprow" style="flex-wrap:wrap"><span class="pill ${cls}" style="max-width:100%">${esc(txt)}</span>
-      ${canRes ? `<span style="display:flex;gap:6px;margin-left:auto">${cap && !ev.free ? `<button class="edit" style="color:var(--red)" data-a="delParty" data-v="${i}" aria-label="Retirer cette partie">Retirer</button>` : ''}<button class="edit" data-a="editParty" data-v="${i}">${pt.outcome ? 'Modifier' : 'Saisir'}</button></span>` : ''}</div></div>`;
+      ${canRes || inParty(pt) ? `<span style="display:flex;gap:6px;margin-left:auto">${cap && !ev.free ? `<button class="edit" style="color:var(--red)" data-a="delParty" data-v="${i}" aria-label="Retirer cette partie">Retirer</button>` : ''}<button class="edit" data-a="editParty" data-v="${i}">${pt.outcome ? 'Modifier' : 'Saisir'}</button></span>` : ''}</div></div>`;
     }).join('');
     const ep = has(U.pEdit) && P[U.pEdit] ? P[U.pEdit] : null;
     html += `<div class="toprow"><div style="font-size:16px;font-weight:800">${isIC ? 'Ordre de départ' : 'Parties'}</div>
       <div style="font-size:13px;font-weight:800;color:var(--g)">${!ev.free && any ? (isIC ? 'Nous ' + half(won) + ' – ' + half(lost) + ' ' + esc(ev.club || '') : 'Équipe ' + half(won) + ' – ' + half(lost)) : ''}</div></div>
       ${cards || '<div class="small">Aucune partie encore.' + (cap && !ev.free ? ' Ajoute les départs ci-dessous.' : '') + '</div>'}`;
-    if (ep && canRes) {
+    if (ep && (canRes || inParty(ep))) {
       const M = (ev.holes || 18) === 9 ? M9 : M18;
       html += `<div class="panel"><div class="t14" style="font-weight:800">Qui gagne ?</div>
       <button class="btn left ${U.pOut === 'win' ? 'sel' : ''}" data-a="pOut" data-v="win">${esc(names(ep.a))} gagne</button>
@@ -933,6 +950,21 @@ function vResults(ev) {
         ${U.partyErr ? `<div class="err">${esc(U.partyErr)}</div>` : ''}
         <div class="flex"><button class="btn" data-a="closeAddParty">Annuler</button><button class="btn primary" data-a="saveParty">Ajouter</button></div></div>`;
       }
+    }
+    if (!cap && P.some(inParty)) html += `<div class="small">Tu peux saisir le résultat de ta propre partie. Les autres sont saisies par leur joueur ou par le capitaine.</div>`;
+    const mks = matchKeys(ev), ex2 = ev.extra || {};
+    if (mks.length) {
+      const canX = ev.free ? (ev.invited || []).includes(mk) : cap;
+      html += `<div class="toprow"><div style="font-size:16px;font-weight:800">Pars et birdies</div><div class="small" style="font-weight:700">facultatif</div></div>
+      <div class="list">${mks.map(k => {
+        const e = ex2[k] || {}, mine2 = canX || k === mk;
+        return `<div class="li" style="gap:8px"><div class="grow t14" style="font-weight:600">${esc(nameOf(k))}</div>
+        ${mine2
+          ? `<input class="in num" type="number" inputmode="numeric" min="0" max="18" data-pb="${esc(k)}|pars" value="${esc(e.pars || '')}" placeholder="pars" aria-label="Pars de ${esc(nameOf(k))}">
+             <input class="in num" type="number" inputmode="numeric" min="0" max="18" data-pb="${esc(k)}|birdies" value="${esc(e.birdies || '')}" placeholder="bird." aria-label="Birdies de ${esc(nameOf(k))}">`
+          : `<span class="pill">${has(e.pars) ? e.pars + ' pars' : '—'}${has(e.birdies) ? ' · ' + e.birdies + ' bird.' : ''}</span>`}</div>`;
+      }).join('')}</div>
+      <div class="small">Nombre de trous joués en par et en birdie. Ces chiffres n'entrent pas dans le résultat de la rencontre.</div>`;
     }
   }
   if (isCourse(ev.type)) {
@@ -1245,8 +1277,8 @@ function vStats() {
   let html = vHeader('Statistiques') + `<div class="scroll" id="scroll"><div class="tabs" style="grid-template-columns:repeat(4,1fr)">
   ${[['mp', 'Match play'], ['score', 'Stableford'], ['put', 'Putting'], ['pres', 'Présences']].map(([k, l]) => `<button class="tab ${U.statTab === k ? 'on' : ''}" data-a="statTab" data-v="${k}" style="font-size:11px">${l}</button>`).join('')}</div>`;
   if (U.statTab === 'mp') {
-    const rows = rankRows(M.filter(p => St[p.k].mp.length).map(p => { const x = St[p.k]; return { k: p.k, name: p.name, pts: x.pts, sub: 'Simple ' + rec(x.mpS) + ' · Foursome ' + rec(x.mpF), value: fmtPts(x.pts) }; }), (a, b) => b.pts - a.pts);
-    html += `<div class="small">Simple et foursome · victoire 1 pt, partagé ½ · V-N-D = victoires, nuls, défaites. Touche un joueur pour voir ses matchs.</div><div class="list">${rows.map(r => row(r, 'openMatches')).join('') || '<div class="li small">Aucun match play saisi.</div>'}</div>`;
+    const rows = rankRows(M.filter(p => St[p.k].mp.length).map(p => { const x = St[p.k]; return { k: p.k, name: p.name, pts: x.pts, sub: 'Simple ' + rec(x.mpS) + ' · Foursome ' + rec(x.mpF) + (x.pb.rounds ? ' · ' + pbText(x.pb) : ''), value: fmtPts(x.pts) }; }), (a, b) => b.pts - a.pts);
+    html += `<div class="small">Simple et foursome · victoire 1 pt, partagé ½ · V-N-D = victoires, nuls, défaites. Touche un joueur pour voir sa fiche.</div><div class="list">${rows.map(r => row(r, 'openPlayer')).join('') || '<div class="li small">Aucun match play saisi.</div>'}</div>`;
   } else if (U.statTab === 'score') {
     [['stab18', 'Stableford 18 trous'], ['stab9', 'Stableford 9 trous']].forEach(([k, t]) => {
       const rows = rankRows(M.filter(p => St[p.k][k].length).map(p => { const a = St[p.k][k], m = avg(a); return { k: p.k, name: p.name, m, sub: a.length + (a.length > 1 ? ' parties' : ' partie') + ' · meilleur ' + Math.max(...a), value: fmtN(m) }; }), (a, b) => b.m - a.m);
@@ -1265,6 +1297,10 @@ function vStats() {
   }
   return html + '</div>';
 }
+/* Moyennes de pars et birdies par match, sur les matchs ou ils sont notes. */
+const pbAvg = (v, n) => n ? (v / n).toFixed(1).replace('.', ',') : '–';
+const pbText = B => pbAvg(B.pars, B.rounds) + ' pars · ' + pbAvg(B.birdies, B.rounds) + ' birdies';
+
 function vFiche(k, withBack) {
   const St = computeStats(), X = St[k];
   const p = members().find(m => m.k === k);
@@ -1279,6 +1315,7 @@ function vFiche(k, withBack) {
   ];
   if (X.stab9.length) tiles.push({ l: 'Stableford 9 trous', v: fmtN(avg(X.stab9)), s: 'moyenne · ' + X.stab9.length + ' partie(s)' });
   tiles.push({ l: 'Putts par trou', v: PP.holes ? (PP.putts / PP.holes).toFixed(2).replace('.', ',') : '—', s: PP.rounds ? 'sur ' + PP.rounds + ' parcours' : 'aucune donnée' });
+  if (X.pb.rounds) tiles.push({ l: 'Pars et birdies', v: pbAvg(X.pb.pars, X.pb.rounds) + ' / ' + pbAvg(X.pb.birdies, X.pb.rounds), s: 'moyenne par match · ' + X.pb.rounds + ' match' + (X.pb.rounds > 1 ? 's' : '') });
   tiles.push({ l: 'Greens en régulation', v: PP.girHoles ? pct(PP.girOk, PP.girHoles) : '—', s: PP.girHoles ? PP.girOk + ' / ' + PP.girHoles + ' trous' : 'aucune donnée' });
   tiles.push({ l: 'Approche-put', v: pct(PP.udOk, PP.udTry), s: PP.udOk + ' / ' + PP.udTry + ' réussis' });
   tiles.push({ l: 'Sandy', v: pct(PP.sOk, PP.sTry), s: PP.sOk + ' / ' + PP.sTry + ' réussis' });
@@ -1843,6 +1880,15 @@ root.addEventListener('change', e => {
     return;
   }
   if (el.dataset.file !== undefined) { readImportFile(el.files && el.files[0]); el.value = ''; return; }
+  if (el.dataset.pb) {
+    const [k, f] = el.dataset.pb.split('|'); const raw = String(el.value).trim();
+    const ev = getEv(U.sel); if (!ev) return;
+    const cur = ((ev.extra || {})[k] || {})[f] || '';
+    if (raw === String(cur)) return;
+    if (raw !== '' && (!/^\d+$/.test(raw) || Number(raw) > 18)) { toast('Entre un nombre entre 0 et 18'); el.value = cur; return; }
+    safe(() => updateDoc(evRef(U.sel), { ['extra.' + k + '.' + f]: raw === '' ? deleteField() : raw }));
+    return;
+  }
   if (el.tagName === 'TEXTAREA' && el.dataset.rb) { setField(el); U.impFile = ''; U.impSheet = ''; render(); return; }
   if (el.tagName === 'INPUT' && el.dataset.rb) { setField(el); render(); return; }
   if (el.tagName === 'SELECT') setField(el);
