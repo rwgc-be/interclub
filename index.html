@@ -159,7 +159,7 @@ const firebaseConfig = {
 };
 // Administrateurs (création des équipes et des capitaines). Même liste que dans firestore.rules.
 const ADMINS = ["francisberlier@gmail.com"];
-const VERSION = "v4.5";   // a incrementer a chaque publication
+const VERSION = "v4.6";   // a incrementer a chaque publication
 /* ========================================================= */
 
 const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -794,7 +794,7 @@ function vAgenda() {
       : (mine === 'yes' ? `<span class="pill yes">${ST.yes}</span>` : inOther ? `<span class="pill">Autre créneau</span>` : full ? `<span class="pill no">Complet</span>` : `<span class="pill ${mine}">${ST[mine]}</span>`);
     return `<button class="ev" data-a="open" data-v="${esc(e.id)}">
     <span class="tile" style="background:${typeOf(e.type).color};color:${ink(typeOf(e.type).color)}"><span>${JOURS[d.getDay()]}</span><b>${d.getDate()}</b><span>${MOIS_C[d.getMonth()].replace('.', '').toUpperCase()}</span></span>
-    <span class="grow"><span class="t15 ell">${esc(e.title)}</span><span class="small ell">${e.open ? 'Appel à tous · ' : e.free ? 'Partie libre · ' : ''}${esc(typeText(e))}${e.time ? ' · ' + esc(timeText(e)) : ''}${e.max ? ' · max ' + e.max : ''}${e.group ? ' · créneau lié' : ''}</span></span>${e.imp ? STAR : ''}${right}</button>`;
+    <span class="grow"><span class="t15 ell">${esc(e.title)}</span><span class="small ell">${e.open ? 'Appel à tous · ' : e.free ? 'Partie libre · ' : ''}${esc(typeText(e))}${e.time ? ' · ' + esc(timeText(e)) : ''}${e.max ? ' · max ' + e.max : ''}${e.group ? ' · créneau lié' : ''}</span></span>${e.open ? CALLMK : ''}${e.imp ? STAR : ''}${right}</button>`;
   };
   const groups = gs => gs.map(g => `<div class="month">${g.month}</div>${g.items.map(item).join('')}`).join('');
   const now = new Date();
@@ -825,10 +825,15 @@ function vBirthday(now) {
 }
 /* Marquage des evenements importants : une etoile rouge, posee par le
    capitaine, visible de tous a cote du compteur d'inscrits. */
-const STAR = '<span class="star" title="Événement important" aria-label="Événement important">★</span>';
+const LION_SRC = 'data:image/png;base64,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';
+const STAR = '<img class="mk" src="' + LION_SRC + '" alt="" title="Événement important" aria-label="Événement important">';
+/* Appel a tous : un golfeur, dessine ici, pantalon bleu et polo blanc. */
+const GOLFER_SVG = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='24' height='24'>  <g stroke='#1E3A5F' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round' fill='none'>    <path d='M14.5 3.2 L21 1.2'/>  </g>  <circle cx='10.6' cy='5.3' r='2.5' fill='#1E3A5F'/>  <path d='M8.3 8.2 h4.8 a1 1 0 0 1 1 1 l.5 4.6 h-7.8 l.5 -4.6 a1 1 0 0 1 1 -1 z'        fill='#FFFFFF' stroke='#1E3A5F' stroke-width='1.3' stroke-linejoin='round'/>  <path d='M13.1 8.6 L16.2 4.6' fill='none' stroke='#FFFFFF' stroke-width='2.6' stroke-linecap='round'/>  <path d='M13.1 8.6 L16.2 4.6' fill='none' stroke='#1E3A5F' stroke-width='1.3' stroke-linecap='round'/>  <path d='M6.8 14.2 h7.8 l-.6 7.4 h-2.4 l-.5 -4.6 -1.1 4.6 h-2.4 z' fill='#1E3A5F'/>  <ellipse cx='11' cy='22.4' rx='6.2' ry='1' fill='#1E3A5F' opacity='.22'/></svg>";
+const CALLMK = '<span class="mk mkg" title="Appel à tous" aria-label="Appel à tous">' + GOLFER_SVG + '</span>';
 (function () {
   const st = document.createElement('style');
-  st.textContent = '.star{color:var(--red);font-size:17px;line-height:1;flex-shrink:0;margin-right:2px}';
+  st.textContent = '.mk{height:21px;width:auto;flex-shrink:0;margin-right:3px}' +
+    '.mkg{display:inline-flex;align-items:center}.mkg svg{height:21px;width:21px;display:block}';
   document.head.appendChild(st);
 })();
 /* Propositions ouvertes, a venir, auxquelles je n'ai pas encore repondu. */
@@ -842,7 +847,7 @@ function openCalls() {
 function vCalls() {
   const list = openCalls(); if (!list.length) return '';
   const n = list.length, show = list.slice(0, 3);
-  return `<div class="calls"><div class="t14" style="font-weight:800">${n} proposition${n > 1 ? 's' : ''} de partie</div>
+  return `<div class="calls"><div class="t14" style="font-weight:800;display:flex;align-items:center;gap:6px">${CALLMK}${n} proposition${n > 1 ? 's' : ''} de partie</div>
   ${show.map(e => `<button class="callrow" data-a="open" data-v="${esc(e.id)}">
     <span class="grow"><span style="font-weight:700">${esc(shortDate(e.date))}${e.time ? ' · ' + esc(timeText(e)) : ''}</span>
     <span class="small">${esc(typeOf(e.type).l)} · ${esc(nameOf(e.org))}${e.place ? ' · ' + esc(e.place) : ''}</span></span>${ICON.chev}</button>`).join('')}
@@ -901,7 +906,7 @@ function vDetail(ev) {
   <div class="scroll" id="scroll" style="gap:18px">
   <div style="display:flex;flex-direction:column;gap:8px">
     <span class="badge" style="background:${t.color};color:${ink(t.color)}">${esc(typeText(ev))}</span>
-    <h2>${ev.imp ? STAR + ' ' : ''}${esc(ev.title)}</h2>
+    <h2>${ev.open ? CALLMK + ' ' : ''}${ev.imp ? STAR + ' ' : ''}${esc(ev.title)}</h2>
     <div class="sub" style="font-weight:500">${longDate(ev.date)}${ev.time ? ' · ' + esc(timeText(ev)) : ''}</div>
     ${ev.place ? `<div class="sub" style="font-weight:500">${esc(ev.place)}</div>` : ''}
     ${ev.free ? `<div style="font-size:13px;font-weight:700;color:var(--or)">${ev.open ? 'Appel à tous' : 'Partie libre'} · organisé${ev.open ? '' : 'e'} par ${esc(nameOf(ev.org))}</div>` : ''}
@@ -920,7 +925,7 @@ function vDetail(ev) {
     <div class="list">${rows.map(x => `<div class="li"><div class="av">${esc(initials(nameOf(x.k)))}</div><div class="grow t14" style="font-weight:600">${esc(nameOf(x.k))}${x.k === mk ? ' (toi)' : ''}</div>
       ${canSet ? `<button class="pill ${x.v} click" data-a="cycle" data-v="${esc(x.k)}" aria-label="Changer la présence de ${esc(nameOf(x.k))}">${ST[x.v]}</button>` : `<span class="pill ${x.v}">${ST[x.v]}</span>`}</div>`).join('') || '<div class="li small">Aucun joueur.</div>'}</div>
   </div>
-  ${cap && !ev.free ? `<button class="btn ${ev.imp ? 'sel' : ''}" data-a="toggleImp">${ev.imp ? '★ Retirer l’importance' : '☆ Marquer comme important'}</button>` : ''}
+  ${cap && !ev.free ? `<button class="btn ${ev.imp ? 'sel' : ''}" data-a="toggleImp">${ev.imp ? 'Retirer le marquage' : 'Marquer comme important'}</button>` : ''}
   ${canDelete ? `<div class="row2"><button class="btn" data-a="editEvent">Modifier</button><button class="btn" data-a="dupEvent">Dupliquer</button></div>` : ''}
   ${canDelete ? (U.confirmDel ? `<div class="card" style="background:var(--redl);border-color:#E8C9C3"><div class="t14" style="color:var(--red)">Supprimer définitivement ?</div><div class="flex"><button class="btn" data-a="confirmDel" data-v="0">Annuler</button><button class="btn" style="background:var(--red);border-color:var(--red);color:#fff" data-a="doDelete">Supprimer</button></div></div>`
     : `<button class="btn danger" data-a="confirmDel" data-v="1">${ev.free ? 'Supprimer la partie' : 'Supprimer l’événement'}</button>`)
