@@ -159,7 +159,7 @@ const firebaseConfig = {
 };
 // Administrateurs (création des équipes et des capitaines). Même liste que dans firestore.rules.
 const ADMINS = ["francisberlier@gmail.com"];
-const VERSION = "v4.7";   // a incrementer a chaque publication
+const VERSION = "v4.8";   // a incrementer a chaque publication
 /* ========================================================= */
 
 const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -477,6 +477,7 @@ function computeStats() {
       pb: { pars: 0, birdies: 0, rounds: 0 } }; });
   const sorted = S.events.slice().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
   sorted.forEach(ev => {
+    if (ev.cancel) return;   // un evenement annule ne compte nulle part
     const memberKeys = (S.team && S.team.memberKeys) || [];
     Object.keys(S2).forEach(k => {
       const inv = ev.free ? (ev.invited || []).includes(k) : memberKeys.includes(k);
@@ -821,11 +822,14 @@ function vAgenda() {
     const mine = r[mk] || 'none';
     const full = isFull(e);
     const inOther = !cap && mine !== 'yes' && e.group && groupOf(e).some(x => x.id !== e.id && (x.r || {})[mk] === 'yes');
-    const right = cap ? `<span class="pill ${full ? 'no' : ''}">${yes} / ${e.max || (e.free ? (e.invited || []).length : nMembers)}</span>`
+    const right = e.cancel ? `<span class="pill no">Annulé</span>`
+      : cap ? `<span class="pill ${full ? 'no' : ''}">${yes} / ${e.max || (e.free ? (e.invited || []).length : nMembers)}</span>`
       : (mine === 'yes' ? `<span class="pill yes">${ST.yes}</span>` : inOther ? `<span class="pill">Autre créneau</span>` : full ? `<span class="pill no">Complet</span>` : `<span class="pill ${mine}">${ST[mine]}</span>`);
-    return `<button class="ev" data-a="open" data-v="${esc(e.id)}">
-    <span class="tile" style="background:${typeOf(e.type).color};color:${ink(typeOf(e.type).color)}"><span>${JOURS[d.getDay()]}</span><b>${d.getDate()}</b><span>${MOIS_C[d.getMonth()].replace('.', '').toUpperCase()}</span></span>
-    <span class="grow"><span class="t15 ell">${esc(e.title)}</span><span class="small ell">${e.open ? 'Appel à tous · ' : e.free ? 'Partie libre · ' : ''}${esc(typeText(e))}${e.time ? ' · ' + esc(timeText(e)) : ''}${e.max ? ' · max ' + e.max : ''}${e.group ? ' · créneau lié' : ''}</span></span>${e.open ? CALLMK : ''}${e.imp ? STAR : ''}${right}</button>`;
+    const sub = e.cancel && e.cancelMsg ? esc(e.cancelMsg)
+      : `${e.open ? 'Appel à tous · ' : e.free ? 'Partie libre · ' : ''}${esc(typeText(e))}${e.time ? ' · ' + esc(timeText(e)) : ''}${e.max ? ' · max ' + e.max : ''}${e.group ? ' · créneau lié' : ''}`;
+    return `<button class="ev${e.cancel ? ' off' : ''}" data-a="open" data-v="${esc(e.id)}">
+    <span class="tile" style="background:${e.cancel ? '#9AA3AE' : typeOf(e.type).color};color:${e.cancel ? '#fff' : ink(typeOf(e.type).color)}"><span>${JOURS[d.getDay()]}</span><b>${d.getDate()}</b><span>${MOIS_C[d.getMonth()].replace('.', '').toUpperCase()}</span></span>
+    <span class="grow"><span class="t15 ell${e.cancel ? ' strike' : ''}">${esc(e.title)}</span><span class="small ell">${sub}</span></span>${e.open && !e.cancel ? CALLMK : ''}${e.imp && !e.cancel ? STAR : ''}${right}</button>`;
   };
   const groups = gs => gs.map(g => `<div class="month">${g.month}</div>${g.items.map(item).join('')}`).join('');
   const now = new Date();
@@ -864,9 +868,24 @@ const CALLMK = '<span class="mk mkg" title="Appel à tous" aria-label="Appel à 
 (function () {
   const st = document.createElement('style');
   st.textContent = '.mk{height:21px;width:auto;flex-shrink:0;margin-right:3px}' +
-    '.mkg{display:inline-flex;align-items:center}.mkg svg{height:21px;width:21px;display:block}';
+    '.mkg{display:inline-flex;align-items:center}.mkg svg{height:21px;width:21px;display:block}' +
+    /* Evenement annule : cadre grise, titre barre. */
+    '.ev.off{opacity:.62;background:#F1F2F4}' +
+    '.strike{text-decoration:line-through}' +
+    '.cxbox{background:#F1F2F4;border:1px solid #D7DBE0;border-radius:14px;padding:12px 14px;' +
+    'display:flex;flex-direction:column;gap:4px}' +
+    '.cxbox .t14{color:#4B5563}';
   document.head.appendChild(st);
 })();
+/* Texte pret a partager pour une annulation. */
+function shareText(ev) {
+  const l = ['⚠️ ANNULÉ — ' + ev.title];
+  l.push(longDate(ev.date) + (ev.time ? ' · ' + timeText(ev) : '') + (ev.place ? ' · ' + ev.place : ''));
+  if (ev.cancelMsg) l.push('Motif : ' + ev.cancelMsg);
+  l.push('');
+  l.push(location.origin + location.pathname);
+  return l.join('\n');
+}
 /* Propositions ouvertes, a venir, auxquelles je n'ai pas encore repondu. */
 function openCalls() {
   const mk = me(), today = new Date().toISOString().slice(0, 10);
@@ -923,8 +942,12 @@ function vDetail(ev) {
   let yes = 0, no = 0;
   const rows = pool.map(k => { const v = r[k] || 'none'; if (v === 'yes') yes++; if (v === 'no') no++; return { k, v, o: v === 'yes' ? 0 : v === 'none' ? 1 : 2 }; })
     .sort((a, b) => a.o - b.o || nameOf(a.k).localeCompare(nameOf(b.k), 'fr'));
-  const canSet = cap && !ev.free;
+  const canSet = cap && !ev.free && !ev.cancel;
   const canDelete = ev.free ? ev.org === mk : cap;
+  /* Annuler : evenements d'equipe seulement. Pour une partie libre,
+     l'organisateur supprime - et les regles Firestore ne lui permettent
+     d'ecrire que r, scores, extra et parties. */
+  const canCancel = cap && !ev.free;
   let resSummary = '';
   if (isMPt(ev.type)) {
     const P = ev.parties || (ev.sideA ? [{ a: ev.sideA, b: ev.sideB }] : []);
@@ -936,18 +959,22 @@ function vDetail(ev) {
   return `<div class="top"><div><button class="back" data-a="backList">${ICON.back}Agenda</button></div></div>
   <div class="scroll" id="scroll" style="gap:18px">
   <div style="display:flex;flex-direction:column;gap:8px">
-    <span class="badge" style="background:${t.color};color:${ink(t.color)}">${esc(typeText(ev))}</span>
-    <h2>${ev.open ? CALLMK + ' ' : ''}${ev.imp ? STAR + ' ' : ''}${esc(ev.title)}</h2>
+    <span class="badge" style="background:${ev.cancel ? '#9AA3AE' : t.color};color:${ev.cancel ? '#fff' : ink(t.color)}">${ev.cancel ? 'Annulé · ' : ''}${esc(typeText(ev))}</span>
+    <h2${ev.cancel ? ' class="strike"' : ''}>${ev.open && !ev.cancel ? CALLMK + ' ' : ''}${ev.imp && !ev.cancel ? STAR + ' ' : ''}${esc(ev.title)}</h2>
     <div class="sub" style="font-weight:500">${longDate(ev.date)}${ev.time ? ' · ' + esc(timeText(ev)) : ''}</div>
     ${ev.place ? `<div class="sub" style="font-weight:500">${esc(ev.place)}</div>` : ''}
     ${ev.free ? `<div style="font-size:13px;font-weight:700;color:var(--or)">${ev.open ? 'Appel à tous' : 'Partie libre'} · organisé${ev.open ? '' : 'e'} par ${esc(nameOf(ev.org))}</div>` : ''}
     ${ev.open && ev.org === mk ? '<div class="small">Les joueurs intéressés répondent « Je participe ». Compose ensuite les parties dans Résultats.</div>' : ''}
     ${ev.notes ? `<div class="small">${esc(ev.notes)}</div>` : ''}
   </div>
+  ${ev.cancel ? `<div class="cxbox"><div class="t14" style="font-weight:800">Événement annulé</div>
+    ${ev.cancelMsg ? `<div class="small">${esc(ev.cancelMsg)}</div>` : ''}
+    <div class="small">Les réponses ci-dessous sont conservées, mais plus personne ne peut s’inscrire. Cet événement ne compte pas dans les présences.</div>
+    <button class="btn" data-a="share">Partager l’annulation</button></div>` : ''}
   ${ev.free && ev.sideA ? `<div class="card vs"><div class="t14 center">${ev.sideA.map(k => esc(nameOf(k))).join('<br>')}</div><div class="small" style="font-weight:800">VS</div><div class="t14 center">${ev.sideB.map(k => esc(nameOf(k))).join('<br>')}</div></div>` : ''}
-  ${concerned ? vParticipation(ev, my) : ''}
-  ${ev.group ? vSlots(ev) : ''}
-  ${isGolf(ev.type) ? `<button class="ev" data-a="openResults" style="padding:14px 16px;border-radius:18px">
+  ${concerned && !ev.cancel ? vParticipation(ev, my) : ''}
+  ${ev.group && !ev.cancel ? vSlots(ev) : ''}
+  ${isGolf(ev.type) && !ev.cancel ? `<button class="ev" data-a="openResults" style="padding:14px 16px;border-radius:18px">
     <span style="width:40px;height:40px;flex-shrink:0;border-radius:12px;background:var(--gl);color:var(--gd);display:flex;align-items:center;justify-content:center">${ICON.trophy}</span>
     <span class="grow"><span class="t15" style="font-weight:800">Résultats</span><span class="small">${esc(resSummary)}</span></span>${ICON.chev}</button>` : ''}
   <div style="display:flex;flex-direction:column;gap:10px">
@@ -956,8 +983,14 @@ function vDetail(ev) {
     <div class="list">${rows.map(x => `<div class="li"><div class="av">${esc(initials(nameOf(x.k)))}</div><div class="grow t14" style="font-weight:600">${esc(nameOf(x.k))}${x.k === mk ? ' (toi)' : ''}</div>
       ${canSet ? `<button class="pill ${x.v} click" data-a="cycle" data-v="${esc(x.k)}" aria-label="Changer la présence de ${esc(nameOf(x.k))}">${ST[x.v]}</button>` : `<span class="pill ${x.v}">${ST[x.v]}</span>`}</div>`).join('') || '<div class="li small">Aucun joueur.</div>'}</div>
   </div>
-  ${cap && !ev.free ? `<button class="btn ${ev.imp ? 'sel' : ''}" data-a="toggleImp">${ev.imp ? 'Retirer le marquage' : 'Marquer comme important'}</button>` : ''}
-  ${canDelete ? `<div class="row2"><button class="btn" data-a="editEvent">Modifier</button><button class="btn" data-a="dupEvent">Dupliquer</button></div>` : ''}
+  ${cap && !ev.free && !ev.cancel ? `<button class="btn ${ev.imp ? 'sel' : ''}" data-a="toggleImp">${ev.imp ? 'Retirer le marquage' : 'Marquer comme important'}</button>` : ''}
+  ${canCancel ? (ev.cancel ? `<button class="btn" data-a="uncancel">Rétablir l’événement</button>`
+    : U.cancelAsk ? `<div class="cxbox"><div class="t14" style="font-weight:800">Annuler cet événement ?</div>
+        <div class="small">Il reste visible dans l’agenda, grisé et barré. Les réponses sont conservées et il ne compte plus dans les présences.</div>
+        <label class="f">Motif (facultatif)<input class="in" data-f="cancelMsg" value="${esc(U.cancelMsg || '')}" placeholder="ex. terrain impraticable"></label>
+        <div class="flex"><button class="btn" data-a="cancelAsk" data-v="0">Retour</button><button class="btn primary" data-a="doCancel">Annuler l’événement</button></div></div>`
+      : `<button class="btn" data-a="cancelAsk" data-v="1">Annuler l’événement</button>`) : ''}
+  ${canDelete && !ev.cancel ? `<div class="row2"><button class="btn" data-a="editEvent">Modifier</button><button class="btn" data-a="dupEvent">Dupliquer</button></div>` : ''}
   ${canDelete ? (U.confirmDel ? `<div class="card" style="background:var(--redl);border-color:#E8C9C3"><div class="t14" style="color:var(--red)">Supprimer définitivement ?</div><div class="flex"><button class="btn" data-a="confirmDel" data-v="0">Annuler</button><button class="btn" style="background:var(--red);border-color:var(--red);color:#fff" data-a="doDelete">Supprimer</button></div></div>`
     : `<button class="btn danger" data-a="confirmDel" data-v="1">${ev.free ? 'Supprimer la partie' : 'Supprimer l’événement'}</button>`)
     : (ev.free && cap ? '<div class="small center">Seul l’organisateur peut supprimer cette partie.</div>' : '')}
@@ -1611,6 +1644,29 @@ const A = {
     const ev = getEv(U.sel); if (!ev) return;
     safe(() => updateDoc(evRef(U.sel), { imp: ev.imp ? deleteField() : true }),
       ev.imp ? 'Marquage retiré' : 'Marqué comme important');
+  },
+  cancelAsk: v => { U.cancelAsk = v === '1'; if (!U.cancelAsk) U.cancelMsg = ''; render(); },
+  doCancel: () => {
+    const ev = getEv(U.sel); if (!ev) return;
+    const m = (U.cancelMsg || '').trim();
+    U.cancelAsk = false; U.cancelMsg = '';
+    safe(() => updateDoc(evRef(U.sel), { cancel: true, cancelMsg: m || deleteField() }), 'Événement annulé');
+  },
+  uncancel: () => {
+    const ev = getEv(U.sel); if (!ev) return;
+    safe(() => updateDoc(evRef(U.sel), { cancel: deleteField(), cancelMsg: deleteField() }), 'Événement rétabli');
+  },
+  /* Partage natif : l'appli prepare le texte, l'utilisateur choisit
+     lui-meme le destinataire (groupe WhatsApp, SMS, mail). Sans
+     navigator.share - surtout sur PC - on se rabat sur le presse-papier. */
+  share: async () => {
+    const ev = getEv(U.sel); if (!ev) return;
+    const txt = shareText(ev);
+    try {
+      if (navigator.share) { await navigator.share({ text: txt }); return; }
+    } catch (e) { if (e && e.name === 'AbortError') return; }
+    try { await navigator.clipboard.writeText(txt); toast('Message copié'); }
+    catch (e) { toast('Copie impossible sur cet appareil'); }
   },
   confirmDel: v => { U.confirmDel = v === '1'; render(); },
   doDelete: () => { const id = U.sel; U.view = 'list'; U.sel = null; U.confirmDel = false; render(); safe(() => deleteDoc(evRef(id)), 'Événement supprimé'); },
