@@ -159,7 +159,7 @@ const firebaseConfig = {
 };
 // Administrateurs (création des équipes et des capitaines). Même liste que dans firestore.rules.
 const ADMINS = ["francisberlier@gmail.com"];
-const VERSION = "v5.5";   // a incrementer a chaque publication
+const VERSION = "v5.6";   // a incrementer a chaque publication
 /* ========================================================= */
 
 const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -410,9 +410,18 @@ const bornOf = k => (S.contacts[k] || {}).born || '';
    sont partages dans members, de quoi afficher le bandeau sans livrer
    ni l'annee, ni l'age, ni le reste de la fiche. */
 const bdOf = k => ((S.team && S.team.members && S.team.members[k]) || {}).bd || '';
+/* Anniversaires encore a l'affiche : le jour J, puis les jours suivants
+   selon bdDays (1 = le jour meme, 0 = jamais). Ceux qui ouvrent l'appli
+   en retard voient encore le bandeau. */
 function birthdaysOn(d) {
-  const key = String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-  return members().filter(m => !m.demo && bdOf(m.k) === key);
+  const n = S.team && S.team.bdDays != null ? S.team.bdDays : 1;
+  if (n < 1) return [];
+  const keys = [];
+  for (let i = 0; i < n; i++) {
+    const x = new Date(d.getFullYear(), d.getMonth(), d.getDate() - i);
+    keys.push(pad(x.getMonth() + 1) + '-' + pad(x.getDate()));
+  }
+  return members().filter(m => !m.demo && keys.includes(bdOf(m.k)));
 }
 function toISODate(v) {
   const t = String(v || '').trim();
@@ -727,6 +736,12 @@ function inEaster(d) {
 }
 function activeTheme() {
   const t = S.team || {}; let k = t.theme || 'none';
+  /* Fenetre d'affichage choisie par le capitaine : hors periode, rien. */
+  if (t.themeFrom || t.themeTo) {
+    const d = new Date(), today = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+    if (t.themeFrom && today < t.themeFrom) return 'none';
+    if (t.themeTo && today > t.themeTo) return 'none';
+  }
   if (k === 'auto') {
     const d = new Date(), md = pad(d.getMonth() + 1) + '-' + pad(d.getDate());
     if (inEaster(d)) k = 'paques';
@@ -782,6 +797,12 @@ function vHeader(title, plusAction, plusLabel) {
     <label class="f">Décoration<select class="in" data-f="tiTheme" data-r="1">${Object.entries(THEMES).map(([k, x]) => `<option value="${k}" ${U.tiTheme === k ? 'selected' : ''}>${esc(x.l)}</option>`).join('')}</select></label>
     ${THEMES[U.tiTheme] && THEMES[U.tiTheme].bg ? `<label class="f">Message du bandeau<input class="in" data-f="tiMsg" value="${esc(U.tiMsg)}" placeholder="${esc(THEMES[U.tiTheme].msg)}"></label><div class="small">Laisse vide pour le message par défaut.${U.tiTheme === 'nouvelan' ? ' « {an} » est remplacé par l’année.' : ''}</div>` : ''}
     ${U.tiTheme === 'auto' ? '<div class="small">Saint-Nicolas du 20/11 au 6/12, Noël jusqu’au 27/12, Nouvel an jusqu’au 10/1, hiver jusqu’au 19/3, printemps jusqu’au 31/5, puis aucune. Pâques s’intercale des Rameaux au lundi de Pâques (date calculée chaque année).</div>' : ''}
+    ${THEMES[U.tiTheme] && THEMES[U.tiTheme].bg ? `<div class="row2"><label class="f">Afficher du<input class="in" type="date" data-f="tiFrom" value="${esc(U.tiFrom || '')}"></label><label class="f">au<input class="in" type="date" data-f="tiTo" value="${esc(U.tiTo || '')}"></label></div>
+    <div class="small">${U.tiFrom || U.tiTo ? 'Hors de cette période, aucune décoration.' : 'Laisse vide pour afficher en permanence.'}</div>` : ''}
+    <label class="f">Bandeau d’anniversaire<select class="in" data-f="tiBdDays" data-r="1">${
+      [['1', 'Le jour même'], ['2', '2 jours'], ['3', '3 jours'], ['7', 'Une semaine'], ['0', 'Jamais']].map(([v, l]) => `<option value="${v}" ${String(U.tiBdDays) === v ? 'selected' : ''}>${l}</option>`).join('')
+    }</select></label>
+    <div class="small">${U.tiBdDays === '0' ? 'Aucun bandeau d’anniversaire.' : U.tiBdDays === '1' ? 'Visible uniquement le jour de l’anniversaire.' : 'Visible le jour J puis les jours suivants : ceux qui ouvrent l’appli en retard le voient encore.'}</div>
     <div class="flex"><button class="btn" data-a="cancelTitle">Annuler</button><button class="btn primary" data-a="saveTitle">Enregistrer</button></div></div></div>`;
   const titleEl = S.teams.length > 1
     ? `<select class="tsel" data-f="teamPick" data-r="1" aria-label="Changer d’équipe">${S.teams.map(x => `<option value="${esc(x.id)}" ${x.id === S.teamId ? 'selected' : ''}>${esc(tt(x))}</option>`).join('')}</select>`
@@ -1983,14 +2004,26 @@ const A = {
     }, 'Joueur retiré — ses accès restent mémorisés');
   },
   saveMyPhone: () => { const ph = (U.myPhone ?? phoneOf(me())).trim(); if (!okPhone(ph)) return toast('N° de GSM invalide.'); U.myPhone = undefined; safe(() => setPhone(me(), ph), 'GSM enregistré'); },
-  editTitle: () => { const t = S.team; U.titleEdit = true; U.tiTitle = t.title || ('Interclub ' + (t.name || '')); U.tiName = t.name || ''; U.tiSeason = t.season || ''; U.tiTheme = t.theme || 'none'; U.tiMsg = (t.themeMsgs || {})[U.tiTheme] || ''; render(); },
+  editTitle: () => {
+    const t = S.team; U.titleEdit = true;
+    U.tiTitle = t.title || ('Interclub ' + (t.name || '')); U.tiName = t.name || ''; U.tiSeason = t.season || '';
+    U.tiTheme = t.theme || 'none'; U.tiMsg = (t.themeMsgs || {})[U.tiTheme] || '';
+    U.tiFrom = t.themeFrom || ''; U.tiTo = t.themeTo || '';
+    U.tiBdDays = String(t.bdDays == null ? 1 : t.bdDays);
+    render();
+  },
   cancelTitle: () => { U.titleEdit = false; render(); },
   saveTitle: () => {
     const title = (U.tiTitle || '').trim(), name = (U.tiName || '').trim(), season = (U.tiSeason || '').trim();
     if (!title || !name) return toast('Titre et nom court obligatoires.');
+    const from = (U.tiFrom || '').trim(), to = (U.tiTo || '').trim();
+    if (from && to && to < from) return toast('La date de fin précède le début.');
     U.titleEdit = false; render();
-    const upd = { title, name, season, theme: U.tiTheme || 'none' };
-    if (THEMES[U.tiTheme] && THEMES[U.tiTheme].bg) upd['themeMsgs.' + U.tiTheme] = (U.tiMsg || '').trim();
+    const upd = { title, name, season, theme: U.tiTheme || 'none', bdDays: parseInt(U.tiBdDays, 10) || 0 };
+    const deco = THEMES[U.tiTheme] && THEMES[U.tiTheme].bg;
+    if (deco) upd['themeMsgs.' + U.tiTheme] = (U.tiMsg || '').trim();
+    upd.themeFrom = deco && from ? from : deleteField();
+    upd.themeTo = deco && to ? to : deleteField();
     safe(() => updateDoc(doc(db, 'teams', S.teamId), upd), 'Enregistré');
   },
   installNow: async () => { if (!installEvt) return; installEvt.prompt(); try { await installEvt.userChoice; } catch (e) {} installEvt = null; render(); },
