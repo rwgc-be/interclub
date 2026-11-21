@@ -159,7 +159,7 @@ const firebaseConfig = {
 };
 // Administrateurs (création des équipes et des capitaines). Même liste que dans firestore.rules.
 const ADMINS = ["francisberlier@gmail.com"];
-const VERSION = "v4.9";   // a incrementer a chaque publication
+const VERSION = "v5.0";   // a incrementer a chaque publication
 /* ========================================================= */
 
 const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -614,7 +614,11 @@ function vAuth() {
   ${m === 'signup' ? `<div class="small">${PWD_RULE}</div>` : ''}
   ${U.aErr ? `<div class="err">${esc(U.aErr)}</div>` : ''}${U.aOk ? `<div class="ok">${esc(U.aOk)}</div>` : ''}
   <button class="btn primary" data-a="authGo">${m === 'signup' ? 'Créer le compte' : m === 'reset' ? 'Envoyer le lien' : 'Se connecter'}</button>
-  <div class="small"><b>Mot de passe oublié ?</b> Demande à ton capitaine : il le voit dans ta fiche et peut te le renvoyer par WhatsApp.</div>
+  ${m === 'reset'
+    ? `<div class="small">Indique l’e-mail avec lequel tu te connectes. Tu recevras un lien pour choisir un nouveau mot de passe. Pense à regarder tes courriers indésirables.</div>
+       <button class="link" data-a="authMode" data-v="login">Retour à la connexion</button>`
+    : `<button class="link" data-a="authMode" data-v="reset">Mot de passe oublié ?</button>
+       <div class="small">Tu recevras un lien par e-mail. Si tu ne reçois rien, demande à ton capitaine.</div>`}
   <div class="small">Pas encore d’accès ? Ton capitaine crée ton compte et t’envoie ton identifiant et ton mot de passe.</div>
   <div class="small center">${VERSION}</div>
   </div>`;
@@ -793,11 +797,35 @@ function vHeader(title, plusAction, plusLabel) {
     ${plusAction ? `<button class="round" style="width:40px;height:40px" data-a="${plusAction}" aria-label="${esc(plusLabel)}">${ICON.plus}</button>` : ''}
   </div></div>${vDeco()}`;
 }
+/* Evenements a venir, non annules, ou je suis convoque sans avoir repondu.
+   Complets exclus : il n'y a plus rien a y faire. */
+function pending() {
+  const mk = me(), today = new Date().toISOString().slice(0, 10);
+  const pool = (S.team && S.team.memberKeys) || [];
+  const seen = new Set();
+  return (S.events || []).filter(e => {
+    if (e.cancel || e.date < today) return false;
+    const invited = e.free ? (e.invited || []) : pool;
+    if (!invited.includes(mk)) return false;
+    if ((e.r || {})[mk]) return false;          // deja repondu
+    if (e.group) {
+      // un groupe de creneaux = une seule decision a prendre
+      if (groupOf(e).some(x => (x.r || {})[mk] === 'yes')) return false;
+      if (seen.has(e.group)) return false;
+      seen.add(e.group);
+    }
+    return !isFull(e);
+  }).length;
+}
 function vNav() {
   const items = [['agenda', 'Agenda', ICON.cal], ['squad', 'Effectif', ICON.team], ['stats', 'Stats', ICON.stats]];
   if (isAdmin()) items.push(['admin', 'Admin', ICON.admin]);
   if (!S.team && !isAdmin()) return '';
-  return `<nav class="bot" style="grid-template-columns:repeat(${items.length},1fr)">${items.map(([k, l, i]) => `<button class="${U.tab === k ? 'on' : ''}" data-a="tab" data-v="${k}" ${U.tab === k ? 'aria-current="page"' : ''}>${i}${l}</button>`).join('')}</nav>`;
+  const n = S.team ? pending() : 0;
+  return `<nav class="bot" style="grid-template-columns:repeat(${items.length},1fr)">${items.map(([k, l, i]) => {
+    const dot = k === 'agenda' && n ? `<span class="dot">${n > 9 ? '9+' : n}</span>` : '';
+    return `<button class="${U.tab === k ? 'on' : ''}" data-a="tab" data-v="${k}" ${U.tab === k ? 'aria-current="page"' : ''}${dot ? ` aria-label="Agenda, ${n} réponse${n > 1 ? 's' : ''} attendue${n > 1 ? 's' : ''}"` : ''}><span class="navi">${i}${dot}</span>${l}</button>`;
+  }).join('')}</nav>`;
 }
 
 /* ---------- agenda ---------- */
@@ -876,7 +904,12 @@ const CALLMK = '<span class="mk mkg" title="Appel à tous" aria-label="Appel à 
     '.strike{text-decoration:line-through}' +
     '.cxbox{background:#F1F2F4;border:1px solid #D7DBE0;border-radius:14px;padding:12px 14px;' +
     'display:flex;flex-direction:column;gap:4px}' +
-    '.cxbox .t14{color:#4B5563}';
+    '.cxbox .t14{color:#4B5563}' +
+    /* Pastille de reponses attendues, sur l'icone de l'onglet Agenda. */
+    '.navi{position:relative;display:inline-flex}' +
+    '.dot{position:absolute;top:-7px;left:13px;min-width:16px;height:16px;padding:0 4px;' +
+    'border-radius:999px;background:#D92D20;color:#fff;font-size:10px;font-weight:800;' +
+    'line-height:16px;text-align:center;box-shadow:0 0 0 2px #fff}';
   document.head.appendChild(st);
 })();
 /* Texte pret a partager pour une annulation. */
