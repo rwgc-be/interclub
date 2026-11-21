@@ -159,7 +159,7 @@ const firebaseConfig = {
 };
 // Administrateurs (création des équipes et des capitaines). Même liste que dans firestore.rules.
 const ADMINS = ["francisberlier@gmail.com"];
-const VERSION = "v5.6";   // a incrementer a chaque publication
+const VERSION = "v5.7";   // a incrementer a chaque publication
 /* ========================================================= */
 
 const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -410,18 +410,21 @@ const bornOf = k => (S.contacts[k] || {}).born || '';
    sont partages dans members, de quoi afficher le bandeau sans livrer
    ni l'annee, ni l'age, ni le reste de la fiche. */
 const bdOf = k => ((S.team && S.team.members && S.team.members[k]) || {}).bd || '';
-/* Anniversaires encore a l'affiche : le jour J, puis les jours suivants
-   selon bdDays (1 = le jour meme, 0 = jamais). Ceux qui ouvrent l'appli
-   en retard voient encore le bandeau. */
+/* Anniversaires annonces a l'avance : le jour J, et les n-1 jours qui
+   precedent (bdDays 1 = le jour meme, 0 = jamais). Chaque membre repere
+   porte le nombre de jours restants, 0 le jour meme. */
 function birthdaysOn(d) {
   const n = S.team && S.team.bdDays != null ? S.team.bdDays : 1;
   if (n < 1) return [];
-  const keys = [];
+  const idx = {};
   for (let i = 0; i < n; i++) {
-    const x = new Date(d.getFullYear(), d.getMonth(), d.getDate() - i);
-    keys.push(pad(x.getMonth() + 1) + '-' + pad(x.getDate()));
+    const x = new Date(d.getFullYear(), d.getMonth(), d.getDate() + i);
+    const k = pad(x.getMonth() + 1) + '-' + pad(x.getDate());
+    if (idx[k] === undefined) idx[k] = i;          // le plus proche gagne
   }
-  return members().filter(m => !m.demo && keys.includes(bdOf(m.k)));
+  return members().filter(m => !m.demo && idx[bdOf(m.k)] !== undefined)
+    .map(m => Object.assign({}, m, { inDays: idx[bdOf(m.k)] }))
+    .sort((a, b) => a.inDays - b.inDays);
 }
 function toISODate(v) {
   const t = String(v || '').trim();
@@ -734,19 +737,26 @@ function inEaster(d) {
   const t = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
   return t >= from.getTime() && t <= to.getTime();
 }
+/* MM-JJ <-> date complete, pour les champs type="date". L'annee affichee
+   est l'annee courante et n'est jamais enregistree. */
+const mdToDate = md => /^\d{2}-\d{2}$/.test(md || '') ? new Date().getFullYear() + '-' + md : '';
+const dateToMd = v => /^\d{4}-(\d{2})-(\d{2})$/.test(v || '') ? String(v).slice(5) : '';
+/* Periodes effectives : celles du capitaine quand il en a defini,
+   sinon celles d'AUTO_THEMES. Dates en MM-JJ, l'annee ne compte pas. */
+function autoPeriods() {
+  const d = (S.team && S.team.themeDates) || {};
+  return AUTO_THEMES.map(([a, b, k]) => {
+    const c = d[k] || {};
+    return [c.from || a, c.to || b, k];
+  });
+}
 function activeTheme() {
   const t = S.team || {}; let k = t.theme || 'none';
-  /* Fenetre d'affichage choisie par le capitaine : hors periode, rien. */
-  if (t.themeFrom || t.themeTo) {
-    const d = new Date(), today = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
-    if (t.themeFrom && today < t.themeFrom) return 'none';
-    if (t.themeTo && today > t.themeTo) return 'none';
-  }
   if (k === 'auto') {
     const d = new Date(), md = pad(d.getMonth() + 1) + '-' + pad(d.getDate());
     if (inEaster(d)) k = 'paques';
     else {
-      const hit = AUTO_THEMES.find(([a, b]) => a <= b ? (md >= a && md <= b) : (md >= a || md <= b));
+      const hit = autoPeriods().find(([a, b]) => a <= b ? (md >= a && md <= b) : (md >= a || md <= b));
       k = hit ? hit[2] : 'none';
     }
   }
@@ -796,13 +806,18 @@ function vHeader(title, plusAction, plusLabel) {
     <div class="row2"><label class="f">Nom court<input class="in" data-f="tiName" value="${esc(U.tiName)}"></label><label class="f">Saison<input class="in" data-f="tiSeason" value="${esc(U.tiSeason)}"></label></div>
     <label class="f">Décoration<select class="in" data-f="tiTheme" data-r="1">${Object.entries(THEMES).map(([k, x]) => `<option value="${k}" ${U.tiTheme === k ? 'selected' : ''}>${esc(x.l)}</option>`).join('')}</select></label>
     ${THEMES[U.tiTheme] && THEMES[U.tiTheme].bg ? `<label class="f">Message du bandeau<input class="in" data-f="tiMsg" value="${esc(U.tiMsg)}" placeholder="${esc(THEMES[U.tiTheme].msg)}"></label><div class="small">Laisse vide pour le message par défaut.${U.tiTheme === 'nouvelan' ? ' « {an} » est remplacé par l’année.' : ''}</div>` : ''}
-    ${U.tiTheme === 'auto' ? '<div class="small">Saint-Nicolas du 20/11 au 6/12, Noël jusqu’au 27/12, Nouvel an jusqu’au 10/1, hiver jusqu’au 19/3, printemps jusqu’au 31/5, puis aucune. Pâques s’intercale des Rameaux au lundi de Pâques (date calculée chaque année).</div>' : ''}
-    ${THEMES[U.tiTheme] && THEMES[U.tiTheme].bg ? `<div class="row2"><label class="f">Afficher du<input class="in" type="date" data-f="tiFrom" value="${esc(U.tiFrom || '')}"></label><label class="f">au<input class="in" type="date" data-f="tiTo" value="${esc(U.tiTo || '')}"></label></div>
-    <div class="small">${U.tiFrom || U.tiTo ? 'Hors de cette période, aucune décoration.' : 'Laisse vide pour afficher en permanence.'}</div>` : ''}
+    ${U.tiTheme === 'auto' ? `<div class="small">Chaque fête a sa propre période. Pâques n’est pas réglable : sa date change chaque année, l’appli la calcule et l’intercale des Rameaux au lundi de Pâques.</div>
+    <div class="list">${AUTO_THEMES.map(([a, b, k]) => {
+      const c = (U.tiDates || {})[k] || {};
+      return `<div class="li" style="flex-wrap:wrap;gap:6px"><div class="grow t14" style="font-weight:600;min-width:110px">${esc(THEMES[k].l)}</div>
+        <input class="in" type="date" style="width:auto;flex:1;min-width:130px" data-f="tiDate.${k}.from" value="${esc(mdToDate(c.from || a))}" aria-label="Début ${esc(THEMES[k].l)}">
+        <input class="in" type="date" style="width:auto;flex:1;min-width:130px" data-f="tiDate.${k}.to" value="${esc(mdToDate(c.to || b))}" aria-label="Fin ${esc(THEMES[k].l)}"></div>`;
+    }).join('')}</div>
+    <div class="small">L’année n’est pas retenue : seules comptent les dates du jour et du mois, reprises chaque saison.</div>` : ''}
     <label class="f">Bandeau d’anniversaire<select class="in" data-f="tiBdDays" data-r="1">${
-      [['1', 'Le jour même'], ['2', '2 jours'], ['3', '3 jours'], ['7', 'Une semaine'], ['0', 'Jamais']].map(([v, l]) => `<option value="${v}" ${String(U.tiBdDays) === v ? 'selected' : ''}>${l}</option>`).join('')
+      [['1', 'Le jour même'], ['2', 'La veille et le jour même'], ['3', '3 jours avant'], ['7', 'Une semaine avant'], ['0', 'Jamais']].map(([v, l]) => `<option value="${v}" ${String(U.tiBdDays) === v ? 'selected' : ''}>${l}</option>`).join('')
     }</select></label>
-    <div class="small">${U.tiBdDays === '0' ? 'Aucun bandeau d’anniversaire.' : U.tiBdDays === '1' ? 'Visible uniquement le jour de l’anniversaire.' : 'Visible le jour J puis les jours suivants : ceux qui ouvrent l’appli en retard le voient encore.'}</div>
+    <div class="small">${U.tiBdDays === '0' ? 'Aucun bandeau d’anniversaire.' : U.tiBdDays === '1' ? 'Visible uniquement le jour de l’anniversaire.' : 'Annoncé à l’avance — « Anniversaire de Paul dans 3 jours » — puis les vœux le jour même.'}</div>
     <div class="flex"><button class="btn" data-a="cancelTitle">Annuler</button><button class="btn primary" data-a="saveTitle">Enregistrer</button></div></div></div>`;
   const titleEl = S.teams.length > 1
     ? `<select class="tsel" data-f="teamPick" data-r="1" aria-label="Changer d’équipe">${S.teams.map(x => `<option value="${esc(x.id)}" ${x.id === S.teamId ? 'selected' : ''}>${esc(tt(x))}</option>`).join('')}</select>`
@@ -902,13 +917,21 @@ function vAgenda() {
 function vBirthday(now) {
   const list = birthdaysOn(now);
   if (!list.length) return '';
-  const mk = me(), moi = list.some(m => m.k === mk);
-  const autres = list.filter(m => m.k !== mk).map(m => m.name);
-  let txt;
-  if (moi && !autres.length) txt = 'Joyeux anniversaire ! 🎂';
-  else if (moi) txt = 'Joyeux anniversaire, à toi et à ' + joinFr(autres) + ' ! 🎂';
-  else txt = 'Joyeux anniversaire à ' + joinFr(autres) + ' ! 🎂';
-  return `<div class="bday">${esc(txt)}</div>`;
+  const mk = me();
+  /* Le jour meme : on souhaite. Avant : on previent. */
+  const today = list.filter(m => m.inDays === 0), soon = list.filter(m => m.inDays > 0);
+  const lignes = [];
+  if (today.length) {
+    const moi = today.some(m => m.k === mk), autres = today.filter(m => m.k !== mk).map(m => m.name);
+    if (moi && !autres.length) lignes.push('Joyeux anniversaire ! 🎂');
+    else if (moi) lignes.push('Joyeux anniversaire, à toi et à ' + joinFr(autres) + ' ! 🎂');
+    else lignes.push('Joyeux anniversaire à ' + joinFr(autres) + ' ! 🎂');
+  }
+  soon.forEach(m => {
+    const q = m.inDays === 1 ? 'demain' : 'dans ' + m.inDays + ' jours';
+    lignes.push(m.k === mk ? 'Ton anniversaire, c’est ' + q + ' 🎂' : 'Anniversaire de ' + m.name + ' ' + q + ' 🎂');
+  });
+  return lignes.map(t => `<div class="bday">${esc(t)}</div>`).join('');
 }
 /* Marquage des evenements importants : une etoile rouge, posee par le
    capitaine, visible de tous a cote du compteur d'inscrits. */
@@ -2008,7 +2031,7 @@ const A = {
     const t = S.team; U.titleEdit = true;
     U.tiTitle = t.title || ('Interclub ' + (t.name || '')); U.tiName = t.name || ''; U.tiSeason = t.season || '';
     U.tiTheme = t.theme || 'none'; U.tiMsg = (t.themeMsgs || {})[U.tiTheme] || '';
-    U.tiFrom = t.themeFrom || ''; U.tiTo = t.themeTo || '';
+    U.tiDates = JSON.parse(JSON.stringify(t.themeDates || {}));
     U.tiBdDays = String(t.bdDays == null ? 1 : t.bdDays);
     render();
   },
@@ -2016,14 +2039,17 @@ const A = {
   saveTitle: () => {
     const title = (U.tiTitle || '').trim(), name = (U.tiName || '').trim(), season = (U.tiSeason || '').trim();
     if (!title || !name) return toast('Titre et nom court obligatoires.');
-    const from = (U.tiFrom || '').trim(), to = (U.tiTo || '').trim();
-    if (from && to && to < from) return toast('La date de fin précède le début.');
+    /* On n'enregistre que les periodes qui different du calendrier par defaut. */
+    const dates = {};
+    AUTO_THEMES.forEach(([a, b, k]) => {
+      const c = (U.tiDates || {})[k] || {};
+      const from = c.from || a, to = c.to || b;
+      if (from !== a || to !== b) dates[k] = { from, to };
+    });
     U.titleEdit = false; render();
     const upd = { title, name, season, theme: U.tiTheme || 'none', bdDays: parseInt(U.tiBdDays, 10) || 0 };
-    const deco = THEMES[U.tiTheme] && THEMES[U.tiTheme].bg;
-    if (deco) upd['themeMsgs.' + U.tiTheme] = (U.tiMsg || '').trim();
-    upd.themeFrom = deco && from ? from : deleteField();
-    upd.themeTo = deco && to ? to : deleteField();
+    if (THEMES[U.tiTheme] && THEMES[U.tiTheme].bg) upd['themeMsgs.' + U.tiTheme] = (U.tiMsg || '').trim();
+    upd.themeDates = Object.keys(dates).length ? dates : deleteField();
     safe(() => updateDoc(doc(db, 'teams', S.teamId), upd), 'Enregistré');
   },
   installNow: async () => { if (!installEvt) return; installEvt.prompt(); try { await installEvt.userChoice; } catch (e) {} installEvt = null; render(); },
@@ -2178,6 +2204,11 @@ function setField(el) {
   else if (f.startsWith('guest.')) {
     const i = Number(f.split('.')[1]), g = (U.f.guests || []).slice();
     g[i] = el.value; U.f.guests = g.filter(Boolean);
+  }
+  else if (f.startsWith('tiDate.')) {
+    const [, k, side] = f.split('.');
+    U.tiDates = U.tiDates || {};
+    U.tiDates[k] = Object.assign({}, U.tiDates[k], { [side]: dateToMd(el.value) });
   }
   else if (f.startsWith('f.')) U.f[f.slice(2)] = el.value; else U[f] = el.value;
   if (el.dataset.r) render();
