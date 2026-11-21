@@ -159,7 +159,7 @@ const firebaseConfig = {
 };
 // Administrateurs (création des équipes et des capitaines). Même liste que dans firestore.rules.
 const ADMINS = ["francisberlier@gmail.com"];
-const VERSION = "v5.2";   // a incrementer a chaque publication
+const VERSION = "v5.5";   // a incrementer a chaque publication
 /* ========================================================= */
 
 const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -857,10 +857,10 @@ function vAgenda() {
     const left = e.max ? e.max - yes : null;
     const places = e.max ? (full ? ' · complet' : ' · ' + left + ' place' + (left > 1 ? 's' : '') + ' libre' + (left > 1 ? 's' : '')) : '';
     const sub = e.cancel && e.cancelMsg ? esc(e.cancelMsg)
-      : `${e.open ? 'Appel à tous · ' : e.free ? 'Partie libre · ' : ''}${esc(typeText(e))}${e.time ? ' · ' + esc(timeText(e)) : ''}${e.cancel ? '' : places}${e.group ? ' · créneau lié' : ''}`;
+      : `${e.open ? 'Appel à tous · ' : e.free ? 'Partie libre · ' : ''}${esc(typeText(e))}${e.time ? ' · ' + esc(timeText(e)) : ''}${e.cancel || e.open ? '' : places}${e.group ? ' · créneau lié' : ''}`;
     return `<button class="ev${e.cancel ? ' off' : ''}" data-a="open" data-v="${esc(e.id)}">
     <span class="tile" style="background:${e.cancel ? '#9AA3AE' : typeOf(e.type).color};color:${e.cancel ? '#fff' : ink(typeOf(e.type).color)}"><span>${JOURS[d.getDay()]}</span><b>${d.getDate()}</b><span>${MOIS_C[d.getMonth()].replace('.', '').toUpperCase()}</span></span>
-    <span class="grow"><span class="t15 ell${e.cancel ? ' strike' : ''}">${esc(e.title)}</span><span class="small ell">${sub}</span></span>${e.open && !e.cancel ? CALLMK : ''}${e.imp && !e.cancel ? STAR : ''}${right}</button>`;
+    <span class="grow"><span class="t15 ell${e.cancel ? ' strike' : ''}">${esc(e.title)}</span><span class="small ell">${sub}</span></span>${e.open && !e.cancel ? callMark(left, full) : ''}${e.imp && !e.cancel ? STAR : ''}${right}</button>`;
   };
   const groups = gs => gs.map(g => `<div class="month">${g.month}</div>${g.items.map(item).join('')}`).join('');
   const now = new Date();
@@ -896,6 +896,14 @@ const STAR = '<img class="mk" src="' + LION_SRC + '" alt="" title="Événement i
 /* Appel a tous : un golfeur, dessine ici, pantalon bleu et polo blanc. */
 const GOLFER_SVG = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='24' height='24'>  <g stroke='#1E3A5F' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round' fill='none'>    <path d='M14.5 3.2 L21 1.2'/>  </g>  <circle cx='10.6' cy='5.3' r='2.5' fill='#1E3A5F'/>  <path d='M8.3 8.2 h4.8 a1 1 0 0 1 1 1 l.5 4.6 h-7.8 l.5 -4.6 a1 1 0 0 1 1 -1 z'        fill='#FFFFFF' stroke='#1E3A5F' stroke-width='1.3' stroke-linejoin='round'/>  <path d='M13.1 8.6 L16.2 4.6' fill='none' stroke='#FFFFFF' stroke-width='2.6' stroke-linecap='round'/>  <path d='M13.1 8.6 L16.2 4.6' fill='none' stroke='#1E3A5F' stroke-width='1.3' stroke-linecap='round'/>  <path d='M6.8 14.2 h7.8 l-.6 7.4 h-2.4 l-.5 -4.6 -1.1 4.6 h-2.4 z' fill='#1E3A5F'/>  <ellipse cx='11' cy='22.4' rx='6.2' ry='1' fill='#1E3A5F' opacity='.22'/></svg>";
 const CALLMK = '<span class="mk mkg" title="Appel à tous" aria-label="Appel à tous">' + GOLFER_SVG + '</span>';
+/* Golfeur de l'appel a tous, avec le nombre de places encore libres.
+   left null = appel sans limite : golfeur nu. */
+function callMark(left, full) {
+  if (full) return '<span class="mk mkg" title="Appel à tous · complet" aria-label="Appel à tous, complet">' + GOLFER_SVG + '<span class="freed no">0</span></span>';
+  if (left == null) return CALLMK;
+  const t = left + ' place' + (left > 1 ? 's' : '') + ' libre' + (left > 1 ? 's' : '');
+  return '<span class="mk mkg" title="Appel à tous · ' + t + '" aria-label="Appel à tous, ' + t + '">' + GOLFER_SVG + '<span class="freed">' + left + '</span></span>';
+}
 (function () {
   const st = document.createElement('style');
   st.textContent = '.mk{height:21px;width:auto;flex-shrink:0;margin-right:3px}' +
@@ -906,6 +914,15 @@ const CALLMK = '<span class="mk mkg" title="Appel à tous" aria-label="Appel à 
     '.cxbox{background:#F1F2F4;border:1px solid #D7DBE0;border-radius:14px;padding:12px 14px;' +
     'display:flex;flex-direction:column;gap:4px}' +
     '.cxbox .t14{color:#4B5563}' +
+    '.newbox{background:var(--gl);border:1px solid var(--g);border-radius:14px;padding:12px 14px;' +
+    'display:flex;flex-direction:column;gap:4px}' +
+    '.newbox .t14{color:var(--gd)}' +
+    /* Pastille de places libres, sur le golfeur de l'appel a tous. */
+    '.mkg{position:relative}' +
+    '.freed{position:absolute;top:-5px;right:-5px;min-width:14px;height:14px;padding:0 3px;' +
+    'border-radius:999px;background:var(--g);color:#fff;font-size:9px;font-weight:800;' +
+    'line-height:14px;text-align:center;box-shadow:0 0 0 1.5px var(--card)}' +
+    '.freed.no{background:#9AA3AE}' +
     /* Pastille de reponses attendues, sur l'icone de l'onglet Agenda. */
     '.navi{position:relative;display:inline-flex}' +
     '.dot{position:absolute;top:-7px;left:13px;min-width:16px;height:16px;padding:0 4px;' +
@@ -921,9 +938,12 @@ function shareHead(ev, mode) {
   if (ev.open) return '⛳ Appel à tous — ' + ev.title;
   return '📅 ' + typeOf(ev.type).l + ' — ' + ev.title;
 }
-/* Message pret a coller dans WhatsApp. mode : 'remind' pour une relance. */
-function shareText(ev, mode) {
+/* Message pret a coller dans WhatsApp. mode : 'remind' pour un rappel.
+   note : mot libre du capitaine, place juste sous le titre. */
+function shareText(ev, mode, note) {
   const l = [shareHead(ev, mode)];
+  const n = String(note == null ? (U.shareNote || '') : note).trim();
+  if (n) l.push(n);
   l.push(longDate(ev.date) + (ev.time ? ' · ' + timeText(ev) : '') + (ev.place ? ' · ' + ev.place : ''));
   if (ev.cancel) { if (ev.cancelMsg) l.push('Motif : ' + ev.cancelMsg); }
   else {
@@ -1035,7 +1055,8 @@ function vDetail(ev) {
   ${ev.cancel ? `<div class="cxbox"><div class="t14" style="font-weight:800">Événement annulé</div>
     ${ev.cancelMsg ? `<div class="small">${esc(ev.cancelMsg)}</div>` : ''}
     <div class="small">Les réponses ci-dessous sont conservées, mais plus personne ne peut s’inscrire. Cet événement ne compte pas dans les présences.</div>
-    <button class="btn" data-a="share">Partager l’annulation</button></div>` : ''}
+    <label class="f">Mot à ajouter au message (facultatif)<input class="in" data-f="shareNote" value="${esc(U.shareNote || '')}" placeholder="ex. nouvelle date à venir"></label>
+    <button class="btn" data-a="share">${ICON.share} Partager l’annulation</button></div>` : ''}
   ${ev.free && ev.sideA ? `<div class="card vs"><div class="t14 center">${ev.sideA.map(k => esc(nameOf(k))).join('<br>')}</div><div class="small" style="font-weight:800">VS</div><div class="t14 center">${ev.sideB.map(k => esc(nameOf(k))).join('<br>')}</div></div>` : ''}
   ${concerned && !ev.cancel ? vParticipation(ev, my) : ''}
   ${ev.group && !ev.cancel ? vSlots(ev) : ''}
@@ -1048,9 +1069,13 @@ function vDetail(ev) {
     <div class="list">${rows.map(x => `<div class="li"><div class="av">${esc(initials(nameOf(x.k)))}</div><div class="grow t14" style="font-weight:600">${esc(nameOf(x.k))}${x.k === mk ? ' (toi)' : ''}</div>
       ${canSet ? `<button class="pill ${x.v} click" data-a="cycle" data-v="${esc(x.k)}" aria-label="Changer la présence de ${esc(nameOf(x.k))}">${ST[x.v]}</button>` : `<span class="pill ${x.v}">${ST[x.v]}</span>`}</div>`).join('') || '<div class="li small">Aucun joueur.</div>'}</div>
   </div>
-  ${!ev.cancel ? `<div class="row2"><button class="btn" data-a="share">${ICON.share} Partager</button>
+  ${!ev.cancel && U.justCreated ? `<div class="newbox"><div class="t14" style="font-weight:800">${ev.open ? 'Appel lancé' : 'Événement créé'}</div>
+    <div class="small">${ev.open ? 'Il apparaît dans l’agenda de tout l’effectif. Préviens le groupe pour que quelqu’un le voie aujourd’hui.' : 'Préviens l’équipe pour que personne ne le manque.'}</div></div>` : ''}
+  ${!ev.cancel ? `<div style="display:flex;flex-direction:column;gap:8px">
+    <label class="f">Mot à ajouter au message (facultatif)<input class="in" data-f="shareNote" value="${esc(U.shareNote || '')}" placeholder="ex. n’oubliez pas vos cartes"></label>
+    <div class="row2"><button class="btn ${U.justCreated ? 'primary' : ''}" data-a="share">${ICON.share} Partager</button>
     <button class="btn" data-a="share" data-v="remind">${ICON.share} Rappel</button></div>
-    <div class="small">Prépare le message et te laisse choisir où l’envoyer — groupe WhatsApp, SMS ou e-mail.</div>` : ''}
+    <div class="small">Ton mot se place juste sous le titre. Le bouton prépare le message et te laisse choisir où l’envoyer — groupe WhatsApp, SMS ou e-mail.</div></div>` : ''}
   ${cap && !ev.free && !ev.cancel ? `<button class="btn ${ev.imp ? 'sel' : ''}" data-a="toggleImp">${ev.imp ? 'Retirer le marquage' : 'Marquer comme important'}</button>` : ''}
   ${canCancel ? (ev.cancel ? `<button class="btn" data-a="uncancel">Rétablir l’événement</button>`
     : U.cancelAsk ? `<div class="cxbox"><div class="t14" style="font-weight:800">Annuler cet événement ?</div>
@@ -1675,8 +1700,8 @@ const A = {
   tab: v => { U.tab = v; U.view = 'list'; U.sel = null; U.selPlayer = null; U.mEdit = null; if (v === 'agenda') U.todayScroll = true; render(); },
   role: v => { U.roleView = v; U.view = 'list'; U.todayScroll = true; render(); },
   filter: v => { U.agFilter = v; U.todayScroll = true; render(); },
-  open: v => { U.view = 'detail'; U.sel = v; U.confirmDel = false; render(); },
-  backList: () => { U.view = 'list'; U.sel = null; U.selPlayer = null; render(); },
+  open: v => { U.view = 'detail'; U.sel = v; U.confirmDel = false; U.cancelAsk = false; U.shareNote = ''; U.justCreated = false; render(); },
+  backList: () => { U.view = 'list'; U.sel = null; U.selPlayer = null; U.justCreated = false; render(); },
   backDetail: () => { U.view = 'detail'; U.pEdit = null; U.addParty = false; U.xEdit = null; render(); },
   openResults: () => { U.view = 'results'; U.pEdit = null; U.addParty = false; U.xEdit = null; render(); },
   openAdd: () => { resetForm(); U.view = 'add'; render(); },
@@ -1803,7 +1828,12 @@ const A = {
     const slots = cap ? (f.slots || []).filter(sl => sl.date) : [];
     if (cap && (f.slots || []).some(sl => !sl.date)) return err('Indique la date de chaque créneau lié.');
     U.view = 'list'; U.todayScroll = true; render();
-    if (!slots.length) return safe(() => addDoc(collection(db, 'teams', S.teamId, 'events'), ev), 'Événement créé');
+    if (!slots.length) return safe(async () => {
+      const ref = await addDoc(collection(db, 'teams', S.teamId, 'events'), ev);
+      /* Un appel a tous ne sert a rien si personne ne le voit : on ouvre
+         la fiche avec le bouton de partage en evidence. */
+      if (ev.open && ref && getEv(ref.id)) { U.view = 'detail'; U.sel = ref.id; U.shareNote = ''; U.justCreated = true; render(); }
+    }, ev.open ? 'Appel lancé' : 'Événement créé');
     const group = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     safe(async () => {
       const b = writeBatch(db);
