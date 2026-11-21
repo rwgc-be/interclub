@@ -159,7 +159,7 @@ const firebaseConfig = {
 };
 // Administrateurs (création des équipes et des capitaines). Même liste que dans firestore.rules.
 const ADMINS = ["francisberlier@gmail.com"];
-const VERSION = "v5.1";   // a incrementer a chaque publication
+const VERSION = "v5.2";   // a incrementer a chaque publication
 /* ========================================================= */
 
 const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -934,9 +934,10 @@ function shareText(ev, mode) {
       l.push(left > 0 ? left + ' place' + (left > 1 ? 's' : '') + ' libre' + (left > 1 ? 's' : '') + ' sur ' + ev.max : 'Complet');
     }
     if (mode === 'remind') {
-      const miss = missing(ev);
-      if (miss.length) l.push('', 'Sans réponse : ' + miss.map(nameOf).join(', '));
-      l.push('', 'Merci de répondre dans l’appli :');
+      const miss = missing(ev).length, y = yesCount(ev);
+      l.push('', miss
+        ? y + ' inscrit' + (y > 1 ? 's' : '') + ' · ' + miss + ' sans réponse. Merci de répondre dans l’appli :'
+        : 'Tout le monde a répondu. Les détails dans l’appli :');
     } else l.push('', 'Réponds dans l’appli :');
   }
   if (ev.cancel) l.push('');
@@ -1048,7 +1049,7 @@ function vDetail(ev) {
       ${canSet ? `<button class="pill ${x.v} click" data-a="cycle" data-v="${esc(x.k)}" aria-label="Changer la présence de ${esc(nameOf(x.k))}">${ST[x.v]}</button>` : `<span class="pill ${x.v}">${ST[x.v]}</span>`}</div>`).join('') || '<div class="li small">Aucun joueur.</div>'}</div>
   </div>
   ${!ev.cancel ? `<div class="row2"><button class="btn" data-a="share">${ICON.share} Partager</button>
-    <button class="btn" data-a="share" data-v="remind" ${missing(ev).length ? '' : 'disabled style="opacity:.5"'}>Relancer${missing(ev).length ? ' (' + missing(ev).length + ')' : ''}</button></div>
+    <button class="btn" data-a="share" data-v="remind">${ICON.share} Rappel</button></div>
     <div class="small">Prépare le message et te laisse choisir où l’envoyer — groupe WhatsApp, SMS ou e-mail.</div>` : ''}
   ${cap && !ev.free && !ev.cancel ? `<button class="btn ${ev.imp ? 'sel' : ''}" data-a="toggleImp">${ev.imp ? 'Retirer le marquage' : 'Marquer comme important'}</button>` : ''}
   ${canCancel ? (ev.cancel ? `<button class="btn" data-a="uncancel">Rétablir l’événement</button>`
