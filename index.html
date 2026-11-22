@@ -55,7 +55,9 @@ h2{margin:0;font-size:23px;font-weight:800;letter-spacing:-.4px}
 .seg{display:grid;gap:4px;padding:4px;background:#EAEAE3;border-radius:12px}
 .seg button{height:40px;border:none;border-radius:9px;font-size:13px;font-weight:700;background:transparent;color:var(--mut)}
 .seg button.on{background:#fff;color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
-.chips{display:flex;flex-wrap:wrap;gap:5px;padding:0 16px 6px;flex-shrink:0}
+.chips{display:flex;flex-wrap:wrap;gap:3px;padding:0 16px 6px;flex-shrink:0}
+.pastbtn{height:26px;padding:0 8px;border-radius:13px;white-space:nowrap;font-size:11px;font-weight:700;border:1px solid var(--line2);background:#fff;color:#6A6A64}
+.pastbtn.on{background:var(--gl);border-color:var(--g);color:var(--gd)}
 .hdr{padding:calc(8px + env(safe-area-inset-top)) 16px 8px;gap:0}
 .ttl{font-size:18px;font-weight:800;color:var(--ink);letter-spacing:-.2px}
 .tsel{font-size:18px;font-weight:800;color:var(--ink);border:none;background:transparent;padding:0 18px 0 0;max-width:100%;min-width:0;appearance:none;-webkit-appearance:none;background-image:linear-gradient(45deg,transparent 50%,#5A5A55 50%),linear-gradient(135deg,#5A5A55 50%,transparent 50%);background-position:calc(100% - 7px) 55%,calc(100% - 2px) 55%;background-size:5px 5px;background-repeat:no-repeat;text-overflow:ellipsis}
@@ -73,7 +75,7 @@ h2{margin:0;font-size:23px;font-weight:800;letter-spacing:-.4px}
 #fx i{position:absolute;top:-24px;display:block;animation:fxfall linear infinite;will-change:transform}
 @keyframes fxfall{0%{transform:translate3d(0,-24px,0) rotate(0)}100%{transform:translate3d(var(--dx,20px),105vh,0) rotate(var(--rot,180deg))}}
 @media (prefers-reduced-motion: reduce){#fx{display:none}}
-.chip{flex-shrink:0;height:30px;padding:0 11px;border-radius:15px;white-space:nowrap;font-size:12px;font-weight:700;border:1px solid var(--line2);background:#fff;color:var(--ink2)}
+.chip{flex-shrink:0;height:26px;padding:0 8px;border-radius:13px;white-space:nowrap;font-size:11px;font-weight:700;border:1px solid var(--line2);background:#fff;color:var(--ink2)}
 .chip.on{background:var(--ink);border-color:var(--ink);color:#fff}
 .tabs{display:grid;gap:6px}
 .tab{height:40px;border-radius:10px;font-size:12px;font-weight:800;padding:0 4px;border:2px solid #E2E2DC;background:#fff;color:var(--ink2)}
@@ -159,7 +161,7 @@ const firebaseConfig = {
 };
 // Administrateurs (création des équipes et des capitaines). Même liste que dans firestore.rules.
 const ADMINS = ["francisberlier@gmail.com"];
-const VERSION = "v6.3";   // a incrementer a chaque publication
+const VERSION = "v6.7";   // a incrementer a chaque publication
 /* ========================================================= */
 
 const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -211,8 +213,8 @@ const SKILL_RULES = 'Tours de ' + SKILL_HOLES + ' trous à la pépinière, autan
 /* Les deux parcours du club ; 'Autre' laisse la main a un lieu libre. */
 const TERRAINS = ['La Marache', 'Le Lion'];
 const FILTERS = [
-  { k: 'all', l: 'Tous' }, { k: 'ic', l: 'Interclubs' }, { k: 'friendly', l: 'Amicaux' }, { k: 'mp', l: 'Match play' }, { k: 'cal', l: 'Échéances' }, { k: 'course', l: 'Parcours' },
-  { k: 'training', l: 'Entraînements' }, { k: 'lesson', l: 'Cours' }, { k: 'social', l: 'Social' }
+  { k: 'all', l: 'Tous' }, { k: 'ic', l: 'Interclub' }, { k: 'friendly', l: 'Amicaux' }, { k: 'mp', l: 'Match play' }, { k: 'cal', l: 'Sélection' }, { k: 'course', l: 'Parcours' },
+  { k: 'training', l: 'Practice' }, { k: 'lesson', l: 'Cours' }, { k: 'social', l: 'Social' }
 ];
 const FMAP = { ic: ['interclub'], friendly: ['friendly'], mp: ['matchplay', 'redtide'], cal: ['selection'], course: ['course18', 'course9'], training: ['training', 'skills'], lesson: ['lesson'], social: ['meal', 'party', 'meeting', 'trip'] };
 const M18 = ['1 up','2 up','2&1','3&1','3&2','4&2','4&3','5&3','5&4','6&4','6&5','7&5','7&6','8&6','8&7','9&7','9&8','10&8'];
@@ -896,7 +898,9 @@ function vAgenda() {
     return true;
   }).sort((a, b) => ((a.date || '') + (a.time || '')).localeCompare((b.date || '') + (b.time || '')));
   const past = [], fut = [];
+  const nPast = evs.filter(e => e.date < today).length;
   evs.forEach(e => {
+    if (e.date < today && !U.showPast) return;   // passe masque par defaut
     const bucket = e.date < today ? past : fut;
     const d = dt(e.date), key = MOIS[d.getMonth()] + ' ' + d.getFullYear();
     let g = bucket[bucket.length - 1]; if (!g || g.month !== key) { g = { month: key, items: [] }; bucket.push(g); }
@@ -924,9 +928,10 @@ function vAgenda() {
   return vHeader('Agenda', 'openAdd', cap ? 'Ajouter un événement' : 'Organiser une partie')
     + (vInstall() ? `<div style="padding:0 16px 6px">${vInstall()}</div>` : '')
     + vCalls()
-    + `<div class="chips">${FILTERS.map(f => `<button class="chip ${U.agFilter === f.k ? 'on' : ''}" data-a="filter" data-v="${f.k}">${f.l}</button>`).join('')}</div>
+    + `<div class="chips">${FILTERS.map(f => `<button class="chip ${U.agFilter === f.k ? 'on' : ''}" data-a="filter" data-v="${f.k}">${f.l}</button>`).join('')}${
+      nPast ? `<button class="pastbtn ${U.showPast ? 'on' : ''}" data-a="togglePast" aria-pressed="${U.showPast ? 'true' : 'false'}" title="${nPast} événement${nPast > 1 ? 's' : ''} passé${nPast > 1 ? 's' : ''}">${U.showPast ? '☑' : '☐'} Historique</button>` : ''}</div>
     <div class="scroll" id="scroll" style="gap:8px">
-    ${!evs.length ? `<div class="small center" style="padding:24px">Aucun événement${U.agFilter !== 'all' ? ' de ce type' : ''}.</div>` : ''}
+    ${!past.length && !fut.length ? `<div class="small center" style="padding:24px">Aucun événement à venir${U.agFilter !== 'all' ? ' de ce type' : ''}.${nPast && !U.showPast ? '<br>' + nPast + ' passé' + (nPast > 1 ? 's' : '') + ' — touche « Historique » pour les voir.' : ''}</div>` : ''}
     ${groups(past)}
     <div class="today" id="today-mark"><span>Aujourd’hui · ${JOURS_LONG[now.getDay()]} ${now.getDate()} ${MOIS[now.getMonth()].toLowerCase()}</span><i></i></div>
     ${vBirthday(now)}
@@ -1067,6 +1072,12 @@ const joinFr = a => a.length < 2 ? (a[0] || '') : a.slice(0, -1).join(', ') + ' 
 /* ---------- detail ---------- */
 function vParticipation(ev, my) {
   const mk = me(), full = isFull(ev);
+  /* Evenement passe : fige pour les joueurs, le capitaine corrige encore. */
+  if (ev.date < isoToday() && !capView()) {
+    return `<div class="card"><div class="toprow"><div class="t14">Ta participation</div>
+      <span class="pill ${my === 'yes' ? 'yes' : my === 'no' ? 'no' : ''}">${ST[my] || ST.none}</span></div>
+      <div class="small">Événement passé : les réponses sont figées. Demande à ton capitaine en cas d’erreur.</div></div>`;
+  }
   const other = ev.group ? groupOf(ev).find(x => x.id !== ev.id && (x.r || {})[mk] === 'yes') : null;
   let info = '', yesBtn;
   if (my === 'yes') yesBtn = `<button class="btn sel" data-a="setMine" data-v="yes">Je participe</button>`;
@@ -1806,6 +1817,7 @@ const A = {
   tab: v => { U.tab = v; U.view = 'list'; U.sel = null; U.selPlayer = null; U.mEdit = null; if (v === 'agenda') U.todayScroll = true; render(); },
   role: v => { U.roleView = v; U.view = 'list'; U.todayScroll = true; render(); },
   filter: v => { U.agFilter = v; U.todayScroll = true; render(); },
+  togglePast: () => { U.showPast = !U.showPast; U.todayScroll = true; render(); },
   open: v => { U.view = 'detail'; U.sel = v; U.confirmDel = false; U.cancelAsk = false; U.shareNote = ''; U.justCreated = false; render(); },
   backList: () => { U.view = 'list'; U.sel = null; U.selPlayer = null; U.justCreated = false; render(); },
   backDetail: () => { U.view = 'detail'; U.pEdit = null; U.addParty = false; U.xEdit = null; render(); },
@@ -1824,6 +1836,8 @@ const A = {
   },
   setMine: v => {
     const k = me(), id = U.sel, ev = getEv(id);
+    if (!ev) return;
+    if (ev.date < isoToday() && !capView()) return toast('Événement passé : réponses figées.');
     if (v === 'no' || !ev.max) return safe(() => updateDoc(evRef(id), { ['r.' + k]: v }));
     safe(() => runTransaction(db, async tx => {
       const snap = await tx.get(evRef(id)); const d = snap.data() || {}; const r = d.r || {};
