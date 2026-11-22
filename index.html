@@ -159,7 +159,7 @@ const firebaseConfig = {
 };
 // Administrateurs (création des équipes et des capitaines). Même liste que dans firestore.rules.
 const ADMINS = ["francisberlier@gmail.com"];
-const VERSION = "v5.7";   // a incrementer a chaque publication
+const VERSION = "v6.0";   // a incrementer a chaque publication
 /* ========================================================= */
 
 const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -177,6 +177,7 @@ const TYPES = [
   { v: 'redtide', l: 'Marée rouge', color: '#D82B93' },
   { v: 'lesson', l: 'Cours', color: '#56B870' },
   { v: 'training', l: 'Entraînement', color: '#166534' },
+  { v: 'skills', l: 'Approche et putting', color: '#B45309' },
   { v: 'course18', l: 'Parcours 18 trous', color: '#4D7C0F' },
   { v: 'course9', l: 'Parcours 9 trous', color: '#155E75' },
   { v: 'selection', l: 'Sélection des 15', color: '#F7D75D' },
@@ -197,13 +198,23 @@ function ink(hex) {
   return (1.05 / (L + 0.05)) >= ((L + 0.05) / 0.05) ? '#fff' : '#111';
 }
 const PLAYER_TYPES = ['matchplay', 'course18', 'course9'];
+/* Concours d'approche et de putting a la pepiniere, sur 6 trous. */
+const isSkills = t => t === 'skills';
+const SKILL_HOLES = 6;
+/* Pas de plafond : on peut refaire les 6 trous plusieurs fois.
+   La borne ne sert qu'a rattraper une faute de frappe. */
+const SKILL_SANE = 300;
+const SKILL_RULES = 'Tours de ' + SKILL_HOLES + ' trous à la pépinière, autant de fois que convenu.'
+  + '\n\nApproche : birdie 3 points, par 2 points, bogey 1 point, au-delà 0.'
+  + '\n\nPutting : 1 putt 2 points, 2 putts 1 point, au-delà 0.'
+  + '\n\nChacun additionne ses points et encode ses deux totaux à la fin ; le capitaine peut saisir tous les totaux.';
 /* Les deux parcours du club ; 'Autre' laisse la main a un lieu libre. */
 const TERRAINS = ['La Marache', 'Le Lion'];
 const FILTERS = [
   { k: 'all', l: 'Tous' }, { k: 'ic', l: 'Interclubs' }, { k: 'friendly', l: 'Amicaux' }, { k: 'mp', l: 'Match play' }, { k: 'cal', l: 'Échéances' }, { k: 'course', l: 'Parcours' },
   { k: 'training', l: 'Entraînements' }, { k: 'lesson', l: 'Cours' }, { k: 'social', l: 'Social' }
 ];
-const FMAP = { ic: ['interclub'], friendly: ['friendly'], mp: ['matchplay', 'redtide'], cal: ['selection'], course: ['course18', 'course9'], training: ['training'], lesson: ['lesson'], social: ['meal', 'party', 'meeting', 'trip'] };
+const FMAP = { ic: ['interclub'], friendly: ['friendly'], mp: ['matchplay', 'redtide'], cal: ['selection'], course: ['course18', 'course9'], training: ['training', 'skills'], lesson: ['lesson'], social: ['meal', 'party', 'meeting', 'trip'] };
 const M18 = ['1 up','2 up','2&1','3&1','3&2','4&2','4&3','5&3','5&4','6&4','6&5','7&5','7&6','8&6','8&7','9&7','9&8','10&8'];
 const M9 = ['1 up','2 up','2&1','3&1','3&2','4&2','4&3','5&3','5&4'];
 const ST = { yes: 'Présent', no: 'Absent', none: 'À répondre' };
@@ -487,7 +498,8 @@ function setContact(k, data, tid) { return setDoc(doc(db, 'teams', tid || S.team
 function computeStats() {
   const S2 = {};
   members().forEach(p => { S2[p.k] = { mpS: { w: 0, h: 0, l: 0 }, mpF: { w: 0, h: 0, l: 0 }, pts: 0, n: 0, stab18: [], stab9: [], yes: 0, conv: 0, hist: [], mp: [], put: { putts: 0, holes: 0, rounds: 0, udOk: 0, udTry: 0, sOk: 0, sTry: 0, girOk: 0, girHoles: 0 },
-      pb: { pars: 0, birdies: 0, rounds: 0 } }; });
+      pb: { pars: 0, birdies: 0, rounds: 0 },
+      sk: { a: 0, p: 0, n: 0, best: 0 } }; });
   const sorted = S.events.slice().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
   sorted.forEach(ev => {
     if (ev.cancel) return;   // un evenement annule ne compte nulle part
@@ -517,6 +529,15 @@ function computeStats() {
           x.mp.push({ date: ev.date, title: ev.title, four, holes: ev.holes || 18, opp: sd.opp, partner, res: sd.res, margin: pt.margin || '' });
           x.hist.push({ date: ev.date, title: ev.title, tag: (four ? 'Foursome' : 'Simple') + ' · vs ' + sd.opp, label: sd.res === 'win' ? 'Victoire ' + (pt.margin || '') : sd.res === 'loss' ? 'Défaite ' + (pt.margin || '') : 'Partagé', cls: sd.res });
         }));
+      });
+    }
+    if (isSkills(ev.type)) {
+      Object.entries(ev.scores || {}).forEach(([k, v]) => {
+        const K2 = S2[k] && S2[k].sk; if (!K2 || !v || typeof v !== 'object') return;
+        if (!has(v.a) && !has(v.p)) return;
+        const a = Number(v.a || 0), pp = Number(v.p || 0), t = a + pp;
+        K2.a += a; K2.p += pp; K2.n++; if (t > K2.best) K2.best = t;
+        S2[k].hist.push({ date: ev.date, title: ev.title, tag: 'Approche et putting', label: t + ' pts (' + a + ' + ' + pp + ')', cls: '' });
       });
     }
     if (isCourse(ev.type)) {
@@ -1084,6 +1105,10 @@ function vDetail(ev) {
   } else if (isCourse(ev.type)) {
     const ys = pool.filter(k => r[k] === 'yes');
     resSummary = ys.length ? ys.filter(k => has((ev.scores || {})[k])).length + ' / ' + ys.length + ' scores saisis' : 'Aucun joueur confirmé';
+  } else if (isSkills(ev.type)) {
+    const ys = pool.filter(k => r[k] === 'yes'), sc = ev.scores || {};
+    const done = ys.filter(k => { const v = sc[k] || {}; return has(v.a) || has(v.p); }).length;
+    resSummary = ys.length ? done + ' / ' + ys.length + ' totaux saisis' : 'Aucun joueur confirmé';
   }
   return `<div class="top"><div><button class="back" data-a="backList">${ICON.back}Agenda</button></div></div>
   <div class="scroll" id="scroll" style="gap:18px">
@@ -1104,7 +1129,7 @@ function vDetail(ev) {
   ${ev.free && ev.sideA ? `<div class="card vs"><div class="t14 center">${ev.sideA.map(k => esc(nameOf(k))).join('<br>')}</div><div class="small" style="font-weight:800">VS</div><div class="t14 center">${ev.sideB.map(k => esc(nameOf(k))).join('<br>')}</div></div>` : ''}
   ${concerned && !ev.cancel ? vParticipation(ev, my) : ''}
   ${ev.group && !ev.cancel ? vSlots(ev) : ''}
-  ${isGolf(ev.type) && !ev.cancel ? `<button class="ev" data-a="openResults" style="padding:14px 16px;border-radius:18px">
+  ${(isGolf(ev.type) || isSkills(ev.type)) && !ev.cancel ? `<button class="ev" data-a="openResults" style="padding:14px 16px;border-radius:18px">
     <span style="width:40px;height:40px;flex-shrink:0;border-radius:12px;background:var(--gl);color:var(--gd);display:flex;align-items:center;justify-content:center">${ICON.trophy}</span>
     <span class="grow"><span class="t15" style="font-weight:800">Résultats</span><span class="small">${esc(resSummary)}</span></span>${ICON.chev}</button>` : ''}
   <div style="display:flex;flex-direction:column;gap:10px">
@@ -1216,6 +1241,26 @@ function vResults(ev) {
       <div class="small">Nombre de trous joués en par et en birdie. Ces chiffres n'entrent pas dans le résultat de la rencontre.</div>`;
     }
   }
+  if (isSkills(ev.type)) {
+    const pool = ev.free ? (ev.invited || []) : (S.team.memberKeys || []);
+    const ys = pool.filter(k => (ev.r || {})[k] === 'yes');
+    const sc = ev.scores || {};
+    const tot = k => { const v = sc[k] || {}; return has(v.a) || has(v.p) ? Number(v.a || 0) + Number(v.p || 0) : null; };
+    const vals = ys.map(tot).filter(v => v !== null);
+    html += `<div class="card" style="padding:12px 14px;white-space:pre-line">${esc(has(ev.rules) ? ev.rules : SKILL_RULES)}</div>
+    <div class="toprow"><div style="font-size:16px;font-weight:800">Classement</div><div class="small" style="font-weight:700">approche + putting</div></div>
+    <div class="list">${ys.map(k => {
+      const v = sc[k] || {}, t = tot(k), pos = t !== null ? 1 + vals.filter(x => x > t).length : '';
+      const mine = cap || k === mk;
+      return `<div class="li" style="padding:8px 14px;gap:8px"><div class="pos ${pos === 1 ? 'first' : ''}">${pos}</div>
+      <div class="grow"><span class="t14" style="font-weight:600">${esc(nameOf(k))}</span><span style="font-size:11px;font-weight:600;color:var(--g)">${t !== null ? 'Total ' + t + ' pts' : 'À saisir'}</span></div>
+      ${mine
+        ? `<input class="in num" type="number" inputmode="numeric" min="0" data-sk="${esc(k)}|a" value="${has(v.a) ? esc(v.a) : ''}" placeholder="app." aria-label="Points d’approche de ${esc(nameOf(k))}">
+           <input class="in num" type="number" inputmode="numeric" min="0" data-sk="${esc(k)}|p" value="${has(v.p) ? esc(v.p) : ''}" placeholder="putt" aria-label="Points de putting de ${esc(nameOf(k))}">`
+        : `<span class="pill">${has(v.a) ? v.a : '—'} / ${has(v.p) ? v.p : '—'}</span>`}</div>`;
+    }).join('') || '<div class="li small">Aucun joueur n’a confirmé sa participation.</div>'}</div>
+    <div class="small">Deux totaux par joueur : approche puis putting. ${cap ? 'Le capitaine saisit tous les totaux ; chaque joueur saisit le sien.' : 'Tu saisis tes totaux ; le classement se met à jour.'} Enregistré dès que tu quittes la case.</div>`;
+  }
   if (isCourse(ev.type)) {
     const pool = ev.free ? (ev.invited || []) : (S.team.memberKeys || []);
     const ys = pool.filter(k => (ev.r || {})[k] === 'yes');
@@ -1293,6 +1338,8 @@ function vAdd() {
   }<option value="" ${TERRAINS.includes(f.place) ? '' : 'selected'}>Autre lieu…</option></select></label>
   ${TERRAINS.includes(f.place) ? '' : `<input class="in" data-f="f.place" value="${esc(f.place)}" placeholder="${isIC ? 'Club ou parcours' : 'Préciser le lieu'}" aria-label="Lieu">`}
   ${cap ? `<label class="f">Remarque (facultatif)<input class="in" data-f="f.notes" value="${esc(f.notes)}"></label>` : ''}
+  ${isSkills(f.type) ? `<label class="f">Règles du comptage<textarea class="in" data-f="f.rules" rows="7" style="resize:vertical;font-family:inherit;line-height:1.45">${esc(has(f.rules) ? f.rules : SKILL_RULES)}</textarea></label>
+  <div class="small">Ce texte s’affiche aux joueurs sur la page des résultats. Modifie-le si vos règles diffèrent.</div>` : ''}
   ${U.fErr ? `<div class="err">${esc(U.fErr)}</div>` : ''}
   <div class="small">${cap ? 'Tout l’effectif est convoqué et confirme sa participation.' : 'Seuls les joueurs choisis sont invités. Le résultat comptera dans les stats.'}</div>
   <button class="btn primary" data-a="saveEvent">${U.edit ? 'Enregistrer' : 'Créer'}</button>
@@ -1539,7 +1586,7 @@ function vStats() {
   const rec = r => r.w + '-' + r.h + '-' + r.l;
   const row = (r, act, v) => `<button class="li" data-a="${act}" data-v="${esc(r.k)}"><span class="pos ${r.pos === 1 ? 'first' : ''}">${r.pos}</span><span class="grow"><span class="t14">${esc(r.name)}</span><span class="small">${esc(r.sub)}</span></span><span class="t15" style="font-weight:800">${esc(r.value)}</span></button>`;
   let html = vHeader('Statistiques') + `<div class="scroll" id="scroll"><div class="tabs" style="grid-template-columns:repeat(4,1fr)">
-  ${[['mp', 'Match play'], ['score', 'Stableford'], ['put', 'Putting'], ['pres', 'Présences']].map(([k, l]) => `<button class="tab ${U.statTab === k ? 'on' : ''}" data-a="statTab" data-v="${k}" style="font-size:11px">${l}</button>`).join('')}</div>`;
+  ${[['mp', 'Match play'], ['score', 'Stableford'], ['sk', 'Approche'], ['put', 'Putting'], ['pres', 'Présences']].map(([k, l]) => `<button class="tab ${U.statTab === k ? 'on' : ''}" data-a="statTab" data-v="${k}" style="font-size:11px">${l}</button>`).join('')}</div>`;
   if (U.statTab === 'mp') {
     const rows = rankRows(M.filter(p => St[p.k].mp.length).map(p => { const x = St[p.k]; return { k: p.k, name: p.name, pts: x.pts, sub: 'Simple ' + rec(x.mpS) + ' · Foursome ' + rec(x.mpF) + (x.pb.rounds ? ' · ' + pbText(x.pb) : ''), value: fmtPts(x.pts) }; }), (a, b) => b.pts - a.pts);
     html += `<div class="small">Simple et foursome · victoire 1 pt, partagé ½ · V-N-D = victoires, nuls, défaites. Touche un joueur pour voir sa fiche.</div><div class="list">${rows.map(r => row(r, 'openPlayer')).join('') || '<div class="li small">Aucun match play saisi.</div>'}</div>`;
@@ -1549,6 +1596,14 @@ function vStats() {
       if (rows.length) html += `<div class="toprow" style="padding:0 4px"><div class="t14" style="font-weight:800">${t}</div><div class="small">moyenne en points</div></div><div class="list">${rows.map(r => row(r, 'openPlayer')).join('')}</div>`;
     });
     if (!M.some(p => St[p.k].stab18.length || St[p.k].stab9.length)) html += '<div class="small center" style="padding:20px">Aucun score Stableford saisi.</div>';
+  } else if (U.statTab === 'sk') {
+    const rows = rankRows(M.filter(p => St[p.k].sk.n).map(p => {
+      const K2 = St[p.k].sk, m = (K2.a + K2.p) / K2.n;
+      return { k: p.k, name: p.name, m,
+        sub: K2.n + (K2.n > 1 ? ' concours' : ' concours') + ' · approche ' + fmtN(K2.a / K2.n) + ' · putting ' + fmtN(K2.p / K2.n) + ' · meilleur ' + K2.best,
+        value: fmtN(m) };
+    }), (a, b) => b.m - a.m);
+    html += `<div class="small">Moyenne de points par concours, approche et putting cumulés</div><div class="list">${rows.map(r => row(r, 'openPlayer')).join('') || '<div class="li small">Aucun résultat d’approche et putting saisi.</div>'}</div>`;
   } else if (U.statTab === 'put') {
     const rows = rankRows(M.filter(p => { const P = St[p.k].put; return P.holes || P.udTry || P.sTry || P.girHoles; }).map(p => {
       const P = St[p.k].put, ppt = P.holes ? P.putts / P.holes : 99;
@@ -1580,6 +1635,8 @@ function vFiche(k, withBack) {
   if (X.stab9.length) tiles.push({ l: 'Stableford 9 trous', v: fmtN(avg(X.stab9)), s: 'moyenne · ' + X.stab9.length + ' partie(s)' });
   tiles.push({ l: 'Putts par trou', v: PP.holes ? (PP.putts / PP.holes).toFixed(2).replace('.', ',') : '—', s: PP.rounds ? 'sur ' + PP.rounds + ' parcours' : 'aucune donnée' });
   if (X.pb.rounds) tiles.push({ l: 'Pars et birdies', v: pbAvg(X.pb.pars, X.pb.rounds) + ' / ' + pbAvg(X.pb.birdies, X.pb.rounds), s: 'moyenne par match · ' + X.pb.rounds + ' match' + (X.pb.rounds > 1 ? 's' : '') });
+  tiles.push({ l: 'Approche et putting', v: X.sk.n ? fmtN((X.sk.a + X.sk.p) / X.sk.n) : '—',
+    s: X.sk.n ? 'moyenne · app. ' + fmtN(X.sk.a / X.sk.n) + ' · putt ' + fmtN(X.sk.p / X.sk.n) + ' · meilleur ' + X.sk.best : 'aucune donnée' });
   tiles.push({ l: 'Greens en régulation', v: PP.girHoles ? pct(PP.girOk, PP.girHoles) : '—', s: PP.girHoles ? PP.girOk + ' / ' + PP.girHoles + ' trous' : 'aucune donnée' });
   tiles.push({ l: 'Approche-put', v: pct(PP.udOk, PP.udTry), s: PP.udOk + ' / ' + PP.udTry + ' réussis' });
   tiles.push({ l: 'Sandy', v: pct(PP.sOk, PP.sTry), s: PP.sOk + ' / ' + PP.sTry + ' réussis' });
@@ -1831,6 +1888,7 @@ const A = {
     if (f.notes) ev.notes = f.notes.trim();
     if (f.type === 'matchplay' || f.type === 'redtide') { ev.format = f.format || 'single'; ev.holes = f.holes || 18; }
     if (isCourse(f.type)) ev.scoring = 'stableford';
+    if (isSkills(f.type)) { const r = String(has(f.rules) ? f.rules : SKILL_RULES).trim(); if (r) ev.rules = r; }
     if (cap) {
       if (isTeamMatch(f.type)) {
         const club = (f.club || '').trim(); if (!club) return err(f.type === 'friendly' ? 'Indique l’équipe adverse.' : 'Indique le club adverse.');
@@ -1864,7 +1922,7 @@ const A = {
       // group, invited et sideA/sideB restent intacts.
       const id = U.edit;
       const up = { type: ev.type, title: ev.title, date: ev.date, time: ev.time, place: ev.place };
-      ['end', 'notes', 'max', 'format', 'holes', 'club', 'scoring', 'imp'].forEach(k => { up[k] = ev[k] !== undefined ? ev[k] : deleteField(); });
+      ['end', 'notes', 'max', 'format', 'holes', 'club', 'scoring', 'imp', 'rules'].forEach(k => { up[k] = ev[k] !== undefined ? ev[k] : deleteField(); });
       up.home = isTeamMatch(ev.type) ? ev.home : deleteField();
       U.edit = null; U.view = 'detail'; render();
       return safe(() => updateDoc(evRef(id), up), 'Événement modifié');
@@ -2220,6 +2278,17 @@ root.addEventListener('change', e => {
     const k = el.dataset.score, v = el.value.trim();
     if (has(v) && (isNaN(Number(v)) || Number(v) < 0 || Number(v) > 60)) { toast('Score Stableford entre 0 et 60.'); return; }
     safe(() => updateDoc(evRef(U.sel), { ['scores.' + k]: has(v) ? v : deleteField() }));
+    return;
+  }
+  if (el.dataset.sk) {
+    const [k, f] = el.dataset.sk.split('|'); const raw = String(el.value).trim();
+    const ev = getEv(U.sel); if (!ev) return;
+    const cur = ((ev.scores || {})[k] || {})[f] || '';
+    if (raw === String(cur)) return;
+    if (raw !== '' && (!/^\d+$/.test(raw) || Number(raw) > SKILL_SANE)) {
+      toast('Entre un nombre entier de points.'); el.value = cur; return;
+    }
+    safe(() => updateDoc(evRef(U.sel), { ['scores.' + k + '.' + f]: raw === '' ? deleteField() : raw }));
     return;
   }
   if (el.dataset.file !== undefined) { readImportFile(el.files && el.files[0]); el.value = ''; return; }
