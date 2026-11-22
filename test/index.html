@@ -159,7 +159,7 @@ const firebaseConfig = {
 };
 // Administrateurs (création des équipes et des capitaines). Même liste que dans firestore.rules.
 const ADMINS = ["francisberlier@gmail.com"];
-const VERSION = "v5.5";   // a incrementer a chaque publication
+const VERSION = "v5.8";   // a incrementer a chaque publication
 /* ========================================================= */
 
 const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -177,6 +177,7 @@ const TYPES = [
   { v: 'redtide', l: 'Marée rouge', color: '#D82B93' },
   { v: 'lesson', l: 'Cours', color: '#56B870' },
   { v: 'training', l: 'Entraînement', color: '#166534' },
+  { v: 'skills', l: 'Approche et putting', color: '#B45309' },
   { v: 'course18', l: 'Parcours 18 trous', color: '#4D7C0F' },
   { v: 'course9', l: 'Parcours 9 trous', color: '#155E75' },
   { v: 'selection', l: 'Sélection des 15', color: '#F7D75D' },
@@ -197,13 +198,18 @@ function ink(hex) {
   return (1.05 / (L + 0.05)) >= ((L + 0.05) / 0.05) ? '#fff' : '#111';
 }
 const PLAYER_TYPES = ['matchplay', 'course18', 'course9'];
+/* Concours d'approche et de putting a la pepiniere, sur 6 trous. */
+const isSkills = t => t === 'skills';
+const SKILL_HOLES = 6;
+const SKILL_MAX = { a: SKILL_HOLES * 3, p: SKILL_HOLES * 2 };
+const SKILL_RULES = 'Six trous à la pépinière.\n\nApproche : birdie 3 points, par 2 points, bogey 1 point, au-delà 0. Maximum 18 points.\n\nPutting : 1 putt 2 points, 2 putts 1 point, au-delà 0. Maximum 12 points.\n\nChacun encode son total à la fin ; le capitaine peut saisir tous les totaux.';
 /* Les deux parcours du club ; 'Autre' laisse la main a un lieu libre. */
 const TERRAINS = ['La Marache', 'Le Lion'];
 const FILTERS = [
   { k: 'all', l: 'Tous' }, { k: 'ic', l: 'Interclubs' }, { k: 'friendly', l: 'Amicaux' }, { k: 'mp', l: 'Match play' }, { k: 'cal', l: 'Échéances' }, { k: 'course', l: 'Parcours' },
   { k: 'training', l: 'Entraînements' }, { k: 'lesson', l: 'Cours' }, { k: 'social', l: 'Social' }
 ];
-const FMAP = { ic: ['interclub'], friendly: ['friendly'], mp: ['matchplay', 'redtide'], cal: ['selection'], course: ['course18', 'course9'], training: ['training'], lesson: ['lesson'], social: ['meal', 'party', 'meeting', 'trip'] };
+const FMAP = { ic: ['interclub'], friendly: ['friendly'], mp: ['matchplay', 'redtide'], cal: ['selection'], course: ['course18', 'course9'], training: ['training', 'skills'], lesson: ['lesson'], social: ['meal', 'party', 'meeting', 'trip'] };
 const M18 = ['1 up','2 up','2&1','3&1','3&2','4&2','4&3','5&3','5&4','6&4','6&5','7&5','7&6','8&6','8&7','9&7','9&8','10&8'];
 const M9 = ['1 up','2 up','2&1','3&1','3&2','4&2','4&3','5&3','5&4'];
 const ST = { yes: 'Présent', no: 'Absent', none: 'À répondre' };
@@ -410,9 +416,21 @@ const bornOf = k => (S.contacts[k] || {}).born || '';
    sont partages dans members, de quoi afficher le bandeau sans livrer
    ni l'annee, ni l'age, ni le reste de la fiche. */
 const bdOf = k => ((S.team && S.team.members && S.team.members[k]) || {}).bd || '';
+/* Anniversaires annonces a l'avance : le jour J, et les n-1 jours qui
+   precedent (bdDays 1 = le jour meme, 0 = jamais). Chaque membre repere
+   porte le nombre de jours restants, 0 le jour meme. */
 function birthdaysOn(d) {
-  const key = String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-  return members().filter(m => !m.demo && bdOf(m.k) === key);
+  const n = S.team && S.team.bdDays != null ? S.team.bdDays : 1;
+  if (n < 1) return [];
+  const idx = {};
+  for (let i = 0; i < n; i++) {
+    const x = new Date(d.getFullYear(), d.getMonth(), d.getDate() + i);
+    const k = pad(x.getMonth() + 1) + '-' + pad(x.getDate());
+    if (idx[k] === undefined) idx[k] = i;          // le plus proche gagne
+  }
+  return members().filter(m => !m.demo && idx[bdOf(m.k)] !== undefined)
+    .map(m => Object.assign({}, m, { inDays: idx[bdOf(m.k)] }))
+    .sort((a, b) => a.inDays - b.inDays);
 }
 function toISODate(v) {
   const t = String(v || '').trim();
@@ -475,7 +493,8 @@ function setContact(k, data, tid) { return setDoc(doc(db, 'teams', tid || S.team
 function computeStats() {
   const S2 = {};
   members().forEach(p => { S2[p.k] = { mpS: { w: 0, h: 0, l: 0 }, mpF: { w: 0, h: 0, l: 0 }, pts: 0, n: 0, stab18: [], stab9: [], yes: 0, conv: 0, hist: [], mp: [], put: { putts: 0, holes: 0, rounds: 0, udOk: 0, udTry: 0, sOk: 0, sTry: 0, girOk: 0, girHoles: 0 },
-      pb: { pars: 0, birdies: 0, rounds: 0 } }; });
+      pb: { pars: 0, birdies: 0, rounds: 0 },
+      sk: { a: 0, p: 0, n: 0, best: 0 } }; });
   const sorted = S.events.slice().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
   sorted.forEach(ev => {
     if (ev.cancel) return;   // un evenement annule ne compte nulle part
@@ -505,6 +524,15 @@ function computeStats() {
           x.mp.push({ date: ev.date, title: ev.title, four, holes: ev.holes || 18, opp: sd.opp, partner, res: sd.res, margin: pt.margin || '' });
           x.hist.push({ date: ev.date, title: ev.title, tag: (four ? 'Foursome' : 'Simple') + ' · vs ' + sd.opp, label: sd.res === 'win' ? 'Victoire ' + (pt.margin || '') : sd.res === 'loss' ? 'Défaite ' + (pt.margin || '') : 'Partagé', cls: sd.res });
         }));
+      });
+    }
+    if (isSkills(ev.type)) {
+      Object.entries(ev.scores || {}).forEach(([k, v]) => {
+        const K2 = S2[k] && S2[k].sk; if (!K2 || !v || typeof v !== 'object') return;
+        if (!has(v.a) && !has(v.p)) return;
+        const a = Number(v.a || 0), pp = Number(v.p || 0), t = a + pp;
+        K2.a += a; K2.p += pp; K2.n++; if (t > K2.best) K2.best = t;
+        S2[k].hist.push({ date: ev.date, title: ev.title, tag: 'Approche et putting', label: t + ' pts (' + a + ' + ' + pp + ')', cls: '' });
       });
     }
     if (isCourse(ev.type)) {
@@ -725,13 +753,26 @@ function inEaster(d) {
   const t = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
   return t >= from.getTime() && t <= to.getTime();
 }
+/* MM-JJ <-> date complete, pour les champs type="date". L'annee affichee
+   est l'annee courante et n'est jamais enregistree. */
+const mdToDate = md => /^\d{2}-\d{2}$/.test(md || '') ? new Date().getFullYear() + '-' + md : '';
+const dateToMd = v => /^\d{4}-(\d{2})-(\d{2})$/.test(v || '') ? String(v).slice(5) : '';
+/* Periodes effectives : celles du capitaine quand il en a defini,
+   sinon celles d'AUTO_THEMES. Dates en MM-JJ, l'annee ne compte pas. */
+function autoPeriods() {
+  const d = (S.team && S.team.themeDates) || {};
+  return AUTO_THEMES.map(([a, b, k]) => {
+    const c = d[k] || {};
+    return [c.from || a, c.to || b, k];
+  });
+}
 function activeTheme() {
   const t = S.team || {}; let k = t.theme || 'none';
   if (k === 'auto') {
     const d = new Date(), md = pad(d.getMonth() + 1) + '-' + pad(d.getDate());
     if (inEaster(d)) k = 'paques';
     else {
-      const hit = AUTO_THEMES.find(([a, b]) => a <= b ? (md >= a && md <= b) : (md >= a || md <= b));
+      const hit = autoPeriods().find(([a, b]) => a <= b ? (md >= a && md <= b) : (md >= a || md <= b));
       k = hit ? hit[2] : 'none';
     }
   }
@@ -781,7 +822,18 @@ function vHeader(title, plusAction, plusLabel) {
     <div class="row2"><label class="f">Nom court<input class="in" data-f="tiName" value="${esc(U.tiName)}"></label><label class="f">Saison<input class="in" data-f="tiSeason" value="${esc(U.tiSeason)}"></label></div>
     <label class="f">Décoration<select class="in" data-f="tiTheme" data-r="1">${Object.entries(THEMES).map(([k, x]) => `<option value="${k}" ${U.tiTheme === k ? 'selected' : ''}>${esc(x.l)}</option>`).join('')}</select></label>
     ${THEMES[U.tiTheme] && THEMES[U.tiTheme].bg ? `<label class="f">Message du bandeau<input class="in" data-f="tiMsg" value="${esc(U.tiMsg)}" placeholder="${esc(THEMES[U.tiTheme].msg)}"></label><div class="small">Laisse vide pour le message par défaut.${U.tiTheme === 'nouvelan' ? ' « {an} » est remplacé par l’année.' : ''}</div>` : ''}
-    ${U.tiTheme === 'auto' ? '<div class="small">Saint-Nicolas du 20/11 au 6/12, Noël jusqu’au 27/12, Nouvel an jusqu’au 10/1, hiver jusqu’au 19/3, printemps jusqu’au 31/5, puis aucune. Pâques s’intercale des Rameaux au lundi de Pâques (date calculée chaque année).</div>' : ''}
+    ${U.tiTheme === 'auto' ? `<div class="small">Chaque fête a sa propre période. Pâques n’est pas réglable : sa date change chaque année, l’appli la calcule et l’intercale des Rameaux au lundi de Pâques.</div>
+    <div class="list">${AUTO_THEMES.map(([a, b, k]) => {
+      const c = (U.tiDates || {})[k] || {};
+      return `<div class="li" style="flex-wrap:wrap;gap:6px"><div class="grow t14" style="font-weight:600;min-width:110px">${esc(THEMES[k].l)}</div>
+        <input class="in" type="date" style="width:auto;flex:1;min-width:130px" data-f="tiDate.${k}.from" value="${esc(mdToDate(c.from || a))}" aria-label="Début ${esc(THEMES[k].l)}">
+        <input class="in" type="date" style="width:auto;flex:1;min-width:130px" data-f="tiDate.${k}.to" value="${esc(mdToDate(c.to || b))}" aria-label="Fin ${esc(THEMES[k].l)}"></div>`;
+    }).join('')}</div>
+    <div class="small">L’année n’est pas retenue : seules comptent les dates du jour et du mois, reprises chaque saison.</div>` : ''}
+    <label class="f">Bandeau d’anniversaire<select class="in" data-f="tiBdDays" data-r="1">${
+      [['1', 'Le jour même'], ['2', 'La veille et le jour même'], ['3', '3 jours avant'], ['7', 'Une semaine avant'], ['0', 'Jamais']].map(([v, l]) => `<option value="${v}" ${String(U.tiBdDays) === v ? 'selected' : ''}>${l}</option>`).join('')
+    }</select></label>
+    <div class="small">${U.tiBdDays === '0' ? 'Aucun bandeau d’anniversaire.' : U.tiBdDays === '1' ? 'Visible uniquement le jour de l’anniversaire.' : 'Annoncé à l’avance — « Anniversaire de Paul dans 3 jours » — puis les vœux le jour même.'}</div>
     <div class="flex"><button class="btn" data-a="cancelTitle">Annuler</button><button class="btn primary" data-a="saveTitle">Enregistrer</button></div></div></div>`;
   const titleEl = S.teams.length > 1
     ? `<select class="tsel" data-f="teamPick" data-r="1" aria-label="Changer d’équipe">${S.teams.map(x => `<option value="${esc(x.id)}" ${x.id === S.teamId ? 'selected' : ''}>${esc(tt(x))}</option>`).join('')}</select>`
@@ -881,13 +933,21 @@ function vAgenda() {
 function vBirthday(now) {
   const list = birthdaysOn(now);
   if (!list.length) return '';
-  const mk = me(), moi = list.some(m => m.k === mk);
-  const autres = list.filter(m => m.k !== mk).map(m => m.name);
-  let txt;
-  if (moi && !autres.length) txt = 'Joyeux anniversaire ! 🎂';
-  else if (moi) txt = 'Joyeux anniversaire, à toi et à ' + joinFr(autres) + ' ! 🎂';
-  else txt = 'Joyeux anniversaire à ' + joinFr(autres) + ' ! 🎂';
-  return `<div class="bday">${esc(txt)}</div>`;
+  const mk = me();
+  /* Le jour meme : on souhaite. Avant : on previent. */
+  const today = list.filter(m => m.inDays === 0), soon = list.filter(m => m.inDays > 0);
+  const lignes = [];
+  if (today.length) {
+    const moi = today.some(m => m.k === mk), autres = today.filter(m => m.k !== mk).map(m => m.name);
+    if (moi && !autres.length) lignes.push('Joyeux anniversaire ! 🎂');
+    else if (moi) lignes.push('Joyeux anniversaire, à toi et à ' + joinFr(autres) + ' ! 🎂');
+    else lignes.push('Joyeux anniversaire à ' + joinFr(autres) + ' ! 🎂');
+  }
+  soon.forEach(m => {
+    const q = m.inDays === 1 ? 'demain' : 'dans ' + m.inDays + ' jours';
+    lignes.push(m.k === mk ? 'Ton anniversaire, c’est ' + q + ' 🎂' : 'Anniversaire de ' + m.name + ' ' + q + ' 🎂');
+  });
+  return lignes.map(t => `<div class="bday">${esc(t)}</div>`).join('');
 }
 /* Marquage des evenements importants : une etoile rouge, posee par le
    capitaine, visible de tous a cote du compteur d'inscrits. */
@@ -1040,6 +1100,10 @@ function vDetail(ev) {
   } else if (isCourse(ev.type)) {
     const ys = pool.filter(k => r[k] === 'yes');
     resSummary = ys.length ? ys.filter(k => has((ev.scores || {})[k])).length + ' / ' + ys.length + ' scores saisis' : 'Aucun joueur confirmé';
+  } else if (isSkills(ev.type)) {
+    const ys = pool.filter(k => r[k] === 'yes'), sc = ev.scores || {};
+    const done = ys.filter(k => { const v = sc[k] || {}; return has(v.a) || has(v.p); }).length;
+    resSummary = ys.length ? done + ' / ' + ys.length + ' totaux saisis' : 'Aucun joueur confirmé';
   }
   return `<div class="top"><div><button class="back" data-a="backList">${ICON.back}Agenda</button></div></div>
   <div class="scroll" id="scroll" style="gap:18px">
@@ -1060,7 +1124,7 @@ function vDetail(ev) {
   ${ev.free && ev.sideA ? `<div class="card vs"><div class="t14 center">${ev.sideA.map(k => esc(nameOf(k))).join('<br>')}</div><div class="small" style="font-weight:800">VS</div><div class="t14 center">${ev.sideB.map(k => esc(nameOf(k))).join('<br>')}</div></div>` : ''}
   ${concerned && !ev.cancel ? vParticipation(ev, my) : ''}
   ${ev.group && !ev.cancel ? vSlots(ev) : ''}
-  ${isGolf(ev.type) && !ev.cancel ? `<button class="ev" data-a="openResults" style="padding:14px 16px;border-radius:18px">
+  ${(isGolf(ev.type) || isSkills(ev.type)) && !ev.cancel ? `<button class="ev" data-a="openResults" style="padding:14px 16px;border-radius:18px">
     <span style="width:40px;height:40px;flex-shrink:0;border-radius:12px;background:var(--gl);color:var(--gd);display:flex;align-items:center;justify-content:center">${ICON.trophy}</span>
     <span class="grow"><span class="t15" style="font-weight:800">Résultats</span><span class="small">${esc(resSummary)}</span></span>${ICON.chev}</button>` : ''}
   <div style="display:flex;flex-direction:column;gap:10px">
@@ -1172,6 +1236,26 @@ function vResults(ev) {
       <div class="small">Nombre de trous joués en par et en birdie. Ces chiffres n'entrent pas dans le résultat de la rencontre.</div>`;
     }
   }
+  if (isSkills(ev.type)) {
+    const pool = ev.free ? (ev.invited || []) : (S.team.memberKeys || []);
+    const ys = pool.filter(k => (ev.r || {})[k] === 'yes');
+    const sc = ev.scores || {};
+    const tot = k => { const v = sc[k] || {}; return has(v.a) || has(v.p) ? Number(v.a || 0) + Number(v.p || 0) : null; };
+    const vals = ys.map(tot).filter(v => v !== null);
+    html += `<div class="card" style="padding:12px 14px;white-space:pre-line">${esc(has(ev.rules) ? ev.rules : SKILL_RULES)}</div>
+    <div class="toprow"><div style="font-size:16px;font-weight:800">Classement</div><div class="small" style="font-weight:700">${SKILL_HOLES} trous · points</div></div>
+    <div class="list">${ys.map(k => {
+      const v = sc[k] || {}, t = tot(k), pos = t !== null ? 1 + vals.filter(x => x > t).length : '';
+      const mine = cap || k === mk;
+      return `<div class="li" style="padding:8px 14px;gap:8px"><div class="pos ${pos === 1 ? 'first' : ''}">${pos}</div>
+      <div class="grow"><span class="t14" style="font-weight:600">${esc(nameOf(k))}</span><span style="font-size:11px;font-weight:600;color:var(--g)">${t !== null ? 'Total ' + t + ' pts' : 'À saisir'}</span></div>
+      ${mine
+        ? `<input class="in num" type="number" inputmode="numeric" min="0" max="${SKILL_MAX.a}" data-sk="${esc(k)}|a" value="${has(v.a) ? esc(v.a) : ''}" placeholder="app." aria-label="Points d’approche de ${esc(nameOf(k))}">
+           <input class="in num" type="number" inputmode="numeric" min="0" max="${SKILL_MAX.p}" data-sk="${esc(k)}|p" value="${has(v.p) ? esc(v.p) : ''}" placeholder="putt" aria-label="Points de putting de ${esc(nameOf(k))}">`
+        : `<span class="pill">${has(v.a) ? v.a : '—'} / ${has(v.p) ? v.p : '—'}</span>`}</div>`;
+    }).join('') || '<div class="li small">Aucun joueur n’a confirmé sa participation.</div>'}</div>
+    <div class="small">Deux totaux par joueur : approche (max ${SKILL_MAX.a}) et putting (max ${SKILL_MAX.p}). ${cap ? 'Le capitaine saisit tous les totaux ; chaque joueur saisit le sien.' : 'Tu saisis tes totaux ; le classement se met à jour.'} Enregistré dès que tu quittes la case.</div>`;
+  }
   if (isCourse(ev.type)) {
     const pool = ev.free ? (ev.invited || []) : (S.team.memberKeys || []);
     const ys = pool.filter(k => (ev.r || {})[k] === 'yes');
@@ -1249,6 +1333,8 @@ function vAdd() {
   }<option value="" ${TERRAINS.includes(f.place) ? '' : 'selected'}>Autre lieu…</option></select></label>
   ${TERRAINS.includes(f.place) ? '' : `<input class="in" data-f="f.place" value="${esc(f.place)}" placeholder="${isIC ? 'Club ou parcours' : 'Préciser le lieu'}" aria-label="Lieu">`}
   ${cap ? `<label class="f">Remarque (facultatif)<input class="in" data-f="f.notes" value="${esc(f.notes)}"></label>` : ''}
+  ${isSkills(f.type) ? `<label class="f">Règles du comptage<textarea class="in" data-f="f.rules" rows="7" style="resize:vertical;font-family:inherit;line-height:1.45">${esc(has(f.rules) ? f.rules : SKILL_RULES)}</textarea></label>
+  <div class="small">Ce texte s’affiche aux joueurs sur la page des résultats. Modifie-le si vos règles diffèrent.</div>` : ''}
   ${U.fErr ? `<div class="err">${esc(U.fErr)}</div>` : ''}
   <div class="small">${cap ? 'Tout l’effectif est convoqué et confirme sa participation.' : 'Seuls les joueurs choisis sont invités. Le résultat comptera dans les stats.'}</div>
   <button class="btn primary" data-a="saveEvent">${U.edit ? 'Enregistrer' : 'Créer'}</button>
@@ -1495,7 +1581,7 @@ function vStats() {
   const rec = r => r.w + '-' + r.h + '-' + r.l;
   const row = (r, act, v) => `<button class="li" data-a="${act}" data-v="${esc(r.k)}"><span class="pos ${r.pos === 1 ? 'first' : ''}">${r.pos}</span><span class="grow"><span class="t14">${esc(r.name)}</span><span class="small">${esc(r.sub)}</span></span><span class="t15" style="font-weight:800">${esc(r.value)}</span></button>`;
   let html = vHeader('Statistiques') + `<div class="scroll" id="scroll"><div class="tabs" style="grid-template-columns:repeat(4,1fr)">
-  ${[['mp', 'Match play'], ['score', 'Stableford'], ['put', 'Putting'], ['pres', 'Présences']].map(([k, l]) => `<button class="tab ${U.statTab === k ? 'on' : ''}" data-a="statTab" data-v="${k}" style="font-size:11px">${l}</button>`).join('')}</div>`;
+  ${[['mp', 'Match play'], ['score', 'Stableford'], ['sk', 'Approche'], ['put', 'Putting'], ['pres', 'Présences']].map(([k, l]) => `<button class="tab ${U.statTab === k ? 'on' : ''}" data-a="statTab" data-v="${k}" style="font-size:11px">${l}</button>`).join('')}</div>`;
   if (U.statTab === 'mp') {
     const rows = rankRows(M.filter(p => St[p.k].mp.length).map(p => { const x = St[p.k]; return { k: p.k, name: p.name, pts: x.pts, sub: 'Simple ' + rec(x.mpS) + ' · Foursome ' + rec(x.mpF) + (x.pb.rounds ? ' · ' + pbText(x.pb) : ''), value: fmtPts(x.pts) }; }), (a, b) => b.pts - a.pts);
     html += `<div class="small">Simple et foursome · victoire 1 pt, partagé ½ · V-N-D = victoires, nuls, défaites. Touche un joueur pour voir sa fiche.</div><div class="list">${rows.map(r => row(r, 'openPlayer')).join('') || '<div class="li small">Aucun match play saisi.</div>'}</div>`;
@@ -1505,6 +1591,14 @@ function vStats() {
       if (rows.length) html += `<div class="toprow" style="padding:0 4px"><div class="t14" style="font-weight:800">${t}</div><div class="small">moyenne en points</div></div><div class="list">${rows.map(r => row(r, 'openPlayer')).join('')}</div>`;
     });
     if (!M.some(p => St[p.k].stab18.length || St[p.k].stab9.length)) html += '<div class="small center" style="padding:20px">Aucun score Stableford saisi.</div>';
+  } else if (U.statTab === 'sk') {
+    const rows = rankRows(M.filter(p => St[p.k].sk.n).map(p => {
+      const K2 = St[p.k].sk, m = (K2.a + K2.p) / K2.n;
+      return { k: p.k, name: p.name, m,
+        sub: K2.n + (K2.n > 1 ? ' concours' : ' concours') + ' · approche ' + fmtN(K2.a / K2.n) + ' · putting ' + fmtN(K2.p / K2.n) + ' · meilleur ' + K2.best,
+        value: fmtN(m) };
+    }), (a, b) => b.m - a.m);
+    html += `<div class="small">Moyenne de points par concours, approche et putting cumulés (maximum ${SKILL_MAX.a + SKILL_MAX.p} sur ${SKILL_HOLES} trous)</div><div class="list">${rows.map(r => row(r, 'openPlayer')).join('') || '<div class="li small">Aucun résultat d’approche et putting saisi.</div>'}</div>`;
   } else if (U.statTab === 'put') {
     const rows = rankRows(M.filter(p => { const P = St[p.k].put; return P.holes || P.udTry || P.sTry || P.girHoles; }).map(p => {
       const P = St[p.k].put, ppt = P.holes ? P.putts / P.holes : 99;
@@ -1536,6 +1630,7 @@ function vFiche(k, withBack) {
   if (X.stab9.length) tiles.push({ l: 'Stableford 9 trous', v: fmtN(avg(X.stab9)), s: 'moyenne · ' + X.stab9.length + ' partie(s)' });
   tiles.push({ l: 'Putts par trou', v: PP.holes ? (PP.putts / PP.holes).toFixed(2).replace('.', ',') : '—', s: PP.rounds ? 'sur ' + PP.rounds + ' parcours' : 'aucune donnée' });
   if (X.pb.rounds) tiles.push({ l: 'Pars et birdies', v: pbAvg(X.pb.pars, X.pb.rounds) + ' / ' + pbAvg(X.pb.birdies, X.pb.rounds), s: 'moyenne par match · ' + X.pb.rounds + ' match' + (X.pb.rounds > 1 ? 's' : '') });
+  if (X.sk.n) tiles.push({ l: 'Approche et putting', v: fmtN((X.sk.a + X.sk.p) / X.sk.n), s: 'moyenne · app. ' + fmtN(X.sk.a / X.sk.n) + ' · putt ' + fmtN(X.sk.p / X.sk.n) + ' · meilleur ' + X.sk.best });
   tiles.push({ l: 'Greens en régulation', v: PP.girHoles ? pct(PP.girOk, PP.girHoles) : '—', s: PP.girHoles ? PP.girOk + ' / ' + PP.girHoles + ' trous' : 'aucune donnée' });
   tiles.push({ l: 'Approche-put', v: pct(PP.udOk, PP.udTry), s: PP.udOk + ' / ' + PP.udTry + ' réussis' });
   tiles.push({ l: 'Sandy', v: pct(PP.sOk, PP.sTry), s: PP.sOk + ' / ' + PP.sTry + ' réussis' });
@@ -1787,6 +1882,7 @@ const A = {
     if (f.notes) ev.notes = f.notes.trim();
     if (f.type === 'matchplay' || f.type === 'redtide') { ev.format = f.format || 'single'; ev.holes = f.holes || 18; }
     if (isCourse(f.type)) ev.scoring = 'stableford';
+    if (isSkills(f.type)) { const r = String(has(f.rules) ? f.rules : SKILL_RULES).trim(); if (r) ev.rules = r; }
     if (cap) {
       if (isTeamMatch(f.type)) {
         const club = (f.club || '').trim(); if (!club) return err(f.type === 'friendly' ? 'Indique l’équipe adverse.' : 'Indique le club adverse.');
@@ -1820,7 +1916,7 @@ const A = {
       // group, invited et sideA/sideB restent intacts.
       const id = U.edit;
       const up = { type: ev.type, title: ev.title, date: ev.date, time: ev.time, place: ev.place };
-      ['end', 'notes', 'max', 'format', 'holes', 'club', 'scoring', 'imp'].forEach(k => { up[k] = ev[k] !== undefined ? ev[k] : deleteField(); });
+      ['end', 'notes', 'max', 'format', 'holes', 'club', 'scoring', 'imp', 'rules'].forEach(k => { up[k] = ev[k] !== undefined ? ev[k] : deleteField(); });
       up.home = isTeamMatch(ev.type) ? ev.home : deleteField();
       U.edit = null; U.view = 'detail'; render();
       return safe(() => updateDoc(evRef(id), up), 'Événement modifié');
@@ -1983,14 +2079,29 @@ const A = {
     }, 'Joueur retiré — ses accès restent mémorisés');
   },
   saveMyPhone: () => { const ph = (U.myPhone ?? phoneOf(me())).trim(); if (!okPhone(ph)) return toast('N° de GSM invalide.'); U.myPhone = undefined; safe(() => setPhone(me(), ph), 'GSM enregistré'); },
-  editTitle: () => { const t = S.team; U.titleEdit = true; U.tiTitle = t.title || ('Interclub ' + (t.name || '')); U.tiName = t.name || ''; U.tiSeason = t.season || ''; U.tiTheme = t.theme || 'none'; U.tiMsg = (t.themeMsgs || {})[U.tiTheme] || ''; render(); },
+  editTitle: () => {
+    const t = S.team; U.titleEdit = true;
+    U.tiTitle = t.title || ('Interclub ' + (t.name || '')); U.tiName = t.name || ''; U.tiSeason = t.season || '';
+    U.tiTheme = t.theme || 'none'; U.tiMsg = (t.themeMsgs || {})[U.tiTheme] || '';
+    U.tiDates = JSON.parse(JSON.stringify(t.themeDates || {}));
+    U.tiBdDays = String(t.bdDays == null ? 1 : t.bdDays);
+    render();
+  },
   cancelTitle: () => { U.titleEdit = false; render(); },
   saveTitle: () => {
     const title = (U.tiTitle || '').trim(), name = (U.tiName || '').trim(), season = (U.tiSeason || '').trim();
     if (!title || !name) return toast('Titre et nom court obligatoires.');
+    /* On n'enregistre que les periodes qui different du calendrier par defaut. */
+    const dates = {};
+    AUTO_THEMES.forEach(([a, b, k]) => {
+      const c = (U.tiDates || {})[k] || {};
+      const from = c.from || a, to = c.to || b;
+      if (from !== a || to !== b) dates[k] = { from, to };
+    });
     U.titleEdit = false; render();
-    const upd = { title, name, season, theme: U.tiTheme || 'none' };
+    const upd = { title, name, season, theme: U.tiTheme || 'none', bdDays: parseInt(U.tiBdDays, 10) || 0 };
     if (THEMES[U.tiTheme] && THEMES[U.tiTheme].bg) upd['themeMsgs.' + U.tiTheme] = (U.tiMsg || '').trim();
+    upd.themeDates = Object.keys(dates).length ? dates : deleteField();
     safe(() => updateDoc(doc(db, 'teams', S.teamId), upd), 'Enregistré');
   },
   installNow: async () => { if (!installEvt) return; installEvt.prompt(); try { await installEvt.userChoice; } catch (e) {} installEvt = null; render(); },
@@ -2146,6 +2257,11 @@ function setField(el) {
     const i = Number(f.split('.')[1]), g = (U.f.guests || []).slice();
     g[i] = el.value; U.f.guests = g.filter(Boolean);
   }
+  else if (f.startsWith('tiDate.')) {
+    const [, k, side] = f.split('.');
+    U.tiDates = U.tiDates || {};
+    U.tiDates[k] = Object.assign({}, U.tiDates[k], { [side]: dateToMd(el.value) });
+  }
   else if (f.startsWith('f.')) U.f[f.slice(2)] = el.value; else U[f] = el.value;
   if (el.dataset.r) render();
 }
@@ -2156,6 +2272,18 @@ root.addEventListener('change', e => {
     const k = el.dataset.score, v = el.value.trim();
     if (has(v) && (isNaN(Number(v)) || Number(v) < 0 || Number(v) > 60)) { toast('Score Stableford entre 0 et 60.'); return; }
     safe(() => updateDoc(evRef(U.sel), { ['scores.' + k]: has(v) ? v : deleteField() }));
+    return;
+  }
+  if (el.dataset.sk) {
+    const [k, f] = el.dataset.sk.split('|'); const raw = String(el.value).trim();
+    const ev = getEv(U.sel); if (!ev) return;
+    const cur = ((ev.scores || {})[k] || {})[f] || '';
+    if (raw === String(cur)) return;
+    const max = SKILL_MAX[f];
+    if (raw !== '' && (!/^\d+$/.test(raw) || Number(raw) > max)) {
+      toast((f === 'a' ? 'Approche' : 'Putting') + ' : entre 0 et ' + max + '.'); el.value = cur; return;
+    }
+    safe(() => updateDoc(evRef(U.sel), { ['scores.' + k + '.' + f]: raw === '' ? deleteField() : raw }));
     return;
   }
   if (el.dataset.file !== undefined) { readImportFile(el.files && el.files[0]); el.value = ''; return; }
