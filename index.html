@@ -159,7 +159,7 @@ const firebaseConfig = {
 };
 // Administrateurs (création des équipes et des capitaines). Même liste que dans firestore.rules.
 const ADMINS = ["francisberlier@gmail.com"];
-const VERSION = "v6.0";   // a incrementer a chaque publication
+const VERSION = "v6.3";   // a incrementer a chaque publication
 /* ========================================================= */
 
 const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -1093,7 +1093,11 @@ function vDetail(ev) {
   const rows = pool.map(k => { const v = r[k] || 'none'; if (v === 'yes') yes++; if (v === 'no') no++; return { k, v, o: v === 'yes' ? 0 : v === 'none' ? 1 : 2 }; })
     .sort((a, b) => a.o - b.o || nameOf(a.k).localeCompare(nameOf(b.k), 'fr'));
   const canSet = cap && !ev.free && !ev.cancel;
-  const canDelete = ev.free ? ev.org === mk : cap;
+  /* Partie libre : l'organisateur, et le capitaine pour faire le menage
+     dans l'agenda. Modifier reste reserve a l'organisateur.
+     L'admin supprime tout, y compris depuis la vue Joueur. */
+  const canDelete = isAdmin() || (ev.free ? (ev.org === mk || cap) : cap);
+  const canEdit = ev.free ? ev.org === mk : cap;
   /* Annuler : evenements d'equipe seulement. Pour une partie libre,
      l'organisateur supprime - et les regles Firestore ne lui permettent
      d'ecrire que r, scores, extra et parties. */
@@ -1152,10 +1156,11 @@ function vDetail(ev) {
         <label class="f">Motif (facultatif)<input class="in" data-f="cancelMsg" value="${esc(U.cancelMsg || '')}" placeholder="ex. terrain impraticable"></label>
         <div class="flex"><button class="btn" data-a="cancelAsk" data-v="0">Retour</button><button class="btn primary" data-a="doCancel">Annuler l’événement</button></div></div>`
       : `<button class="btn" data-a="cancelAsk" data-v="1">Annuler l’événement</button>`) : ''}
-  ${canDelete && !ev.cancel ? `<div class="row2"><button class="btn" data-a="editEvent">Modifier</button><button class="btn" data-a="dupEvent">Dupliquer</button></div>` : ''}
+  ${canEdit && !ev.cancel ? `<div class="row2"><button class="btn" data-a="editEvent">Modifier</button><button class="btn" data-a="dupEvent">Dupliquer</button></div>` : ''}
+  ${canDelete && !canEdit && ev.org && ev.org !== mk ? `<div class="small">Organisé par ${esc(nameOf(ev.org))}. Tu peux supprimer, mais pas modifier.</div>` : ''}
   ${canDelete ? (U.confirmDel ? `<div class="card" style="background:var(--redl);border-color:#E8C9C3"><div class="t14" style="color:var(--red)">Supprimer définitivement ?</div><div class="flex"><button class="btn" data-a="confirmDel" data-v="0">Annuler</button><button class="btn" style="background:var(--red);border-color:var(--red);color:#fff" data-a="doDelete">Supprimer</button></div></div>`
     : `<button class="btn danger" data-a="confirmDel" data-v="1">${ev.free ? 'Supprimer la partie' : 'Supprimer l’événement'}</button>`)
-    : (ev.free && cap ? '<div class="small center">Seul l’organisateur peut supprimer cette partie.</div>' : '')}
+    : (ev.free && isCapReal() ? '<div class="small center">Passe en vue Cap. pour pouvoir supprimer cette partie.</div>' : '')}
   </div>`;
 }
 
