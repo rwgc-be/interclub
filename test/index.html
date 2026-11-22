@@ -159,7 +159,7 @@ const firebaseConfig = {
 };
 // Administrateurs (création des équipes et des capitaines). Même liste que dans firestore.rules.
 const ADMINS = ["francisberlier@gmail.com"];
-const VERSION = "v5.8";   // a incrementer a chaque publication
+const VERSION = "v5.9";   // a incrementer a chaque publication
 /* ========================================================= */
 
 const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -201,8 +201,13 @@ const PLAYER_TYPES = ['matchplay', 'course18', 'course9'];
 /* Concours d'approche et de putting a la pepiniere, sur 6 trous. */
 const isSkills = t => t === 'skills';
 const SKILL_HOLES = 6;
-const SKILL_MAX = { a: SKILL_HOLES * 3, p: SKILL_HOLES * 2 };
-const SKILL_RULES = 'Six trous à la pépinière.\n\nApproche : birdie 3 points, par 2 points, bogey 1 point, au-delà 0. Maximum 18 points.\n\nPutting : 1 putt 2 points, 2 putts 1 point, au-delà 0. Maximum 12 points.\n\nChacun encode son total à la fin ; le capitaine peut saisir tous les totaux.';
+/* Pas de plafond : on peut refaire les 6 trous plusieurs fois.
+   La borne ne sert qu'a rattraper une faute de frappe. */
+const SKILL_SANE = 300;
+const SKILL_RULES = 'Tours de ' + SKILL_HOLES + ' trous à la pépinière, autant de fois que convenu.'
+  + '\n\nApproche : birdie 3 points, par 2 points, bogey 1 point, au-delà 0.'
+  + '\n\nPutting : 1 putt 2 points, 2 putts 1 point, au-delà 0.'
+  + '\n\nChacun additionne ses points et encode ses deux totaux à la fin ; le capitaine peut saisir tous les totaux.';
 /* Les deux parcours du club ; 'Autre' laisse la main a un lieu libre. */
 const TERRAINS = ['La Marache', 'Le Lion'];
 const FILTERS = [
@@ -1243,18 +1248,18 @@ function vResults(ev) {
     const tot = k => { const v = sc[k] || {}; return has(v.a) || has(v.p) ? Number(v.a || 0) + Number(v.p || 0) : null; };
     const vals = ys.map(tot).filter(v => v !== null);
     html += `<div class="card" style="padding:12px 14px;white-space:pre-line">${esc(has(ev.rules) ? ev.rules : SKILL_RULES)}</div>
-    <div class="toprow"><div style="font-size:16px;font-weight:800">Classement</div><div class="small" style="font-weight:700">${SKILL_HOLES} trous · points</div></div>
+    <div class="toprow"><div style="font-size:16px;font-weight:800">Classement</div><div class="small" style="font-weight:700">approche + putting</div></div>
     <div class="list">${ys.map(k => {
       const v = sc[k] || {}, t = tot(k), pos = t !== null ? 1 + vals.filter(x => x > t).length : '';
       const mine = cap || k === mk;
       return `<div class="li" style="padding:8px 14px;gap:8px"><div class="pos ${pos === 1 ? 'first' : ''}">${pos}</div>
       <div class="grow"><span class="t14" style="font-weight:600">${esc(nameOf(k))}</span><span style="font-size:11px;font-weight:600;color:var(--g)">${t !== null ? 'Total ' + t + ' pts' : 'À saisir'}</span></div>
       ${mine
-        ? `<input class="in num" type="number" inputmode="numeric" min="0" max="${SKILL_MAX.a}" data-sk="${esc(k)}|a" value="${has(v.a) ? esc(v.a) : ''}" placeholder="app." aria-label="Points d’approche de ${esc(nameOf(k))}">
-           <input class="in num" type="number" inputmode="numeric" min="0" max="${SKILL_MAX.p}" data-sk="${esc(k)}|p" value="${has(v.p) ? esc(v.p) : ''}" placeholder="putt" aria-label="Points de putting de ${esc(nameOf(k))}">`
+        ? `<input class="in num" type="number" inputmode="numeric" min="0" data-sk="${esc(k)}|a" value="${has(v.a) ? esc(v.a) : ''}" placeholder="app." aria-label="Points d’approche de ${esc(nameOf(k))}">
+           <input class="in num" type="number" inputmode="numeric" min="0" data-sk="${esc(k)}|p" value="${has(v.p) ? esc(v.p) : ''}" placeholder="putt" aria-label="Points de putting de ${esc(nameOf(k))}">`
         : `<span class="pill">${has(v.a) ? v.a : '—'} / ${has(v.p) ? v.p : '—'}</span>`}</div>`;
     }).join('') || '<div class="li small">Aucun joueur n’a confirmé sa participation.</div>'}</div>
-    <div class="small">Deux totaux par joueur : approche (max ${SKILL_MAX.a}) et putting (max ${SKILL_MAX.p}). ${cap ? 'Le capitaine saisit tous les totaux ; chaque joueur saisit le sien.' : 'Tu saisis tes totaux ; le classement se met à jour.'} Enregistré dès que tu quittes la case.</div>`;
+    <div class="small">Deux totaux par joueur : approche puis putting. ${cap ? 'Le capitaine saisit tous les totaux ; chaque joueur saisit le sien.' : 'Tu saisis tes totaux ; le classement se met à jour.'} Enregistré dès que tu quittes la case.</div>`;
   }
   if (isCourse(ev.type)) {
     const pool = ev.free ? (ev.invited || []) : (S.team.memberKeys || []);
@@ -1598,7 +1603,7 @@ function vStats() {
         sub: K2.n + (K2.n > 1 ? ' concours' : ' concours') + ' · approche ' + fmtN(K2.a / K2.n) + ' · putting ' + fmtN(K2.p / K2.n) + ' · meilleur ' + K2.best,
         value: fmtN(m) };
     }), (a, b) => b.m - a.m);
-    html += `<div class="small">Moyenne de points par concours, approche et putting cumulés (maximum ${SKILL_MAX.a + SKILL_MAX.p} sur ${SKILL_HOLES} trous)</div><div class="list">${rows.map(r => row(r, 'openPlayer')).join('') || '<div class="li small">Aucun résultat d’approche et putting saisi.</div>'}</div>`;
+    html += `<div class="small">Moyenne de points par concours, approche et putting cumulés</div><div class="list">${rows.map(r => row(r, 'openPlayer')).join('') || '<div class="li small">Aucun résultat d’approche et putting saisi.</div>'}</div>`;
   } else if (U.statTab === 'put') {
     const rows = rankRows(M.filter(p => { const P = St[p.k].put; return P.holes || P.udTry || P.sTry || P.girHoles; }).map(p => {
       const P = St[p.k].put, ppt = P.holes ? P.putts / P.holes : 99;
@@ -2279,9 +2284,8 @@ root.addEventListener('change', e => {
     const ev = getEv(U.sel); if (!ev) return;
     const cur = ((ev.scores || {})[k] || {})[f] || '';
     if (raw === String(cur)) return;
-    const max = SKILL_MAX[f];
-    if (raw !== '' && (!/^\d+$/.test(raw) || Number(raw) > max)) {
-      toast((f === 'a' ? 'Approche' : 'Putting') + ' : entre 0 et ' + max + '.'); el.value = cur; return;
+    if (raw !== '' && (!/^\d+$/.test(raw) || Number(raw) > SKILL_SANE)) {
+      toast('Entre un nombre entier de points.'); el.value = cur; return;
     }
     safe(() => updateDoc(evRef(U.sel), { ['scores.' + k + '.' + f]: raw === '' ? deleteField() : raw }));
     return;
