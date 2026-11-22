@@ -55,7 +55,13 @@ h2{margin:0;font-size:23px;font-weight:800;letter-spacing:-.4px}
 .seg{display:grid;gap:4px;padding:4px;background:#EAEAE3;border-radius:12px}
 .seg button{height:40px;border:none;border-radius:9px;font-size:13px;font-weight:700;background:transparent;color:var(--mut)}
 .seg button.on{background:#fff;color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
-.chips{display:flex;flex-wrap:wrap;gap:5px;padding:0 16px 6px;flex-shrink:0}
+.chips{display:flex;flex-wrap:nowrap;gap:5px;padding:0 16px 6px;flex-shrink:0;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.chips::-webkit-scrollbar{display:none}
+.chips .chip{flex:0 0 auto}
+.chiprow{display:flex;align-items:center;gap:8px;padding:0 16px 6px;flex-shrink:0}
+.chiprow .chips{padding:0;flex:1;min-width:0}
+.pastbtn{flex:0 0 auto;border:1px solid var(--line);background:var(--card);border-radius:999px;padding:6px 10px;font-size:11px;font-weight:700;color:#6A6A64;white-space:nowrap}
+.pastbtn.on{background:var(--gl);border-color:var(--g);color:var(--gd)}
 .hdr{padding:calc(8px + env(safe-area-inset-top)) 16px 8px;gap:0}
 .ttl{font-size:18px;font-weight:800;color:var(--ink);letter-spacing:-.2px}
 .tsel{font-size:18px;font-weight:800;color:var(--ink);border:none;background:transparent;padding:0 18px 0 0;max-width:100%;min-width:0;appearance:none;-webkit-appearance:none;background-image:linear-gradient(45deg,transparent 50%,#5A5A55 50%),linear-gradient(135deg,#5A5A55 50%,transparent 50%);background-position:calc(100% - 7px) 55%,calc(100% - 2px) 55%;background-size:5px 5px;background-repeat:no-repeat;text-overflow:ellipsis}
@@ -159,7 +165,7 @@ const firebaseConfig = {
 };
 // Administrateurs (création des équipes et des capitaines). Même liste que dans firestore.rules.
 const ADMINS = ["francisberlier@gmail.com"];
-const VERSION = "v6.0";   // a incrementer a chaque publication
+const VERSION = "v6.5";   // a incrementer a chaque publication
 /* ========================================================= */
 
 const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -896,7 +902,9 @@ function vAgenda() {
     return true;
   }).sort((a, b) => ((a.date || '') + (a.time || '')).localeCompare((b.date || '') + (b.time || '')));
   const past = [], fut = [];
+  const nPast = evs.filter(e => e.date < today).length;
   evs.forEach(e => {
+    if (e.date < today && !U.showPast) return;   // passe masque par defaut
     const bucket = e.date < today ? past : fut;
     const d = dt(e.date), key = MOIS[d.getMonth()] + ' ' + d.getFullYear();
     let g = bucket[bucket.length - 1]; if (!g || g.month !== key) { g = { month: key, items: [] }; bucket.push(g); }
@@ -924,9 +932,10 @@ function vAgenda() {
   return vHeader('Agenda', 'openAdd', cap ? 'Ajouter un événement' : 'Organiser une partie')
     + (vInstall() ? `<div style="padding:0 16px 6px">${vInstall()}</div>` : '')
     + vCalls()
-    + `<div class="chips">${FILTERS.map(f => `<button class="chip ${U.agFilter === f.k ? 'on' : ''}" data-a="filter" data-v="${f.k}">${f.l}</button>`).join('')}</div>
+    + `<div class="chiprow"><div class="chips">${FILTERS.map(f => `<button class="chip ${U.agFilter === f.k ? 'on' : ''}" data-a="filter" data-v="${f.k}">${f.l}</button>`).join('')}</div>
+    ${nPast ? `<button class="pastbtn ${U.showPast ? 'on' : ''}" data-a="togglePast" aria-pressed="${U.showPast ? 'true' : 'false'}">${U.showPast ? '☑' : '☐'} Passé ${nPast}</button>` : ''}</div>
     <div class="scroll" id="scroll" style="gap:8px">
-    ${!evs.length ? `<div class="small center" style="padding:24px">Aucun événement${U.agFilter !== 'all' ? ' de ce type' : ''}.</div>` : ''}
+    ${!past.length && !fut.length ? `<div class="small center" style="padding:24px">Aucun événement à venir${U.agFilter !== 'all' ? ' de ce type' : ''}.${nPast && !U.showPast ? '<br>' + nPast + ' passé' + (nPast > 1 ? 's' : '') + ' — touche « Passé » pour les voir.' : ''}</div>` : ''}
     ${groups(past)}
     <div class="today" id="today-mark"><span>Aujourd’hui · ${JOURS_LONG[now.getDay()]} ${now.getDate()} ${MOIS[now.getMonth()].toLowerCase()}</span><i></i></div>
     ${vBirthday(now)}
@@ -1067,6 +1076,12 @@ const joinFr = a => a.length < 2 ? (a[0] || '') : a.slice(0, -1).join(', ') + ' 
 /* ---------- detail ---------- */
 function vParticipation(ev, my) {
   const mk = me(), full = isFull(ev);
+  /* Evenement passe : fige pour les joueurs, le capitaine corrige encore. */
+  if (ev.date < isoToday() && !capView()) {
+    return `<div class="card"><div class="toprow"><div class="t14">Ta participation</div>
+      <span class="pill ${my === 'yes' ? 'yes' : my === 'no' ? 'no' : ''}">${ST[my] || ST.none}</span></div>
+      <div class="small">Événement passé : les réponses sont figées. Demande à ton capitaine en cas d’erreur.</div></div>`;
+  }
   const other = ev.group ? groupOf(ev).find(x => x.id !== ev.id && (x.r || {})[mk] === 'yes') : null;
   let info = '', yesBtn;
   if (my === 'yes') yesBtn = `<button class="btn sel" data-a="setMine" data-v="yes">Je participe</button>`;
@@ -1093,7 +1108,11 @@ function vDetail(ev) {
   const rows = pool.map(k => { const v = r[k] || 'none'; if (v === 'yes') yes++; if (v === 'no') no++; return { k, v, o: v === 'yes' ? 0 : v === 'none' ? 1 : 2 }; })
     .sort((a, b) => a.o - b.o || nameOf(a.k).localeCompare(nameOf(b.k), 'fr'));
   const canSet = cap && !ev.free && !ev.cancel;
-  const canDelete = ev.free ? ev.org === mk : cap;
+  /* Partie libre : l'organisateur, et le capitaine pour faire le menage
+     dans l'agenda. Modifier reste reserve a l'organisateur.
+     L'admin supprime tout, y compris depuis la vue Joueur. */
+  const canDelete = isAdmin() || (ev.free ? (ev.org === mk || cap) : cap);
+  const canEdit = ev.free ? ev.org === mk : cap;
   /* Annuler : evenements d'equipe seulement. Pour une partie libre,
      l'organisateur supprime - et les regles Firestore ne lui permettent
      d'ecrire que r, scores, extra et parties. */
@@ -1152,10 +1171,11 @@ function vDetail(ev) {
         <label class="f">Motif (facultatif)<input class="in" data-f="cancelMsg" value="${esc(U.cancelMsg || '')}" placeholder="ex. terrain impraticable"></label>
         <div class="flex"><button class="btn" data-a="cancelAsk" data-v="0">Retour</button><button class="btn primary" data-a="doCancel">Annuler l’événement</button></div></div>`
       : `<button class="btn" data-a="cancelAsk" data-v="1">Annuler l’événement</button>`) : ''}
-  ${canDelete && !ev.cancel ? `<div class="row2"><button class="btn" data-a="editEvent">Modifier</button><button class="btn" data-a="dupEvent">Dupliquer</button></div>` : ''}
+  ${canEdit && !ev.cancel ? `<div class="row2"><button class="btn" data-a="editEvent">Modifier</button><button class="btn" data-a="dupEvent">Dupliquer</button></div>` : ''}
+  ${canDelete && !canEdit && ev.org && ev.org !== mk ? `<div class="small">Organisé par ${esc(nameOf(ev.org))}. Tu peux supprimer, mais pas modifier.</div>` : ''}
   ${canDelete ? (U.confirmDel ? `<div class="card" style="background:var(--redl);border-color:#E8C9C3"><div class="t14" style="color:var(--red)">Supprimer définitivement ?</div><div class="flex"><button class="btn" data-a="confirmDel" data-v="0">Annuler</button><button class="btn" style="background:var(--red);border-color:var(--red);color:#fff" data-a="doDelete">Supprimer</button></div></div>`
     : `<button class="btn danger" data-a="confirmDel" data-v="1">${ev.free ? 'Supprimer la partie' : 'Supprimer l’événement'}</button>`)
-    : (ev.free && cap ? '<div class="small center">Seul l’organisateur peut supprimer cette partie.</div>' : '')}
+    : (ev.free && isCapReal() ? '<div class="small center">Passe en vue Cap. pour pouvoir supprimer cette partie.</div>' : '')}
   </div>`;
 }
 
@@ -1801,6 +1821,7 @@ const A = {
   tab: v => { U.tab = v; U.view = 'list'; U.sel = null; U.selPlayer = null; U.mEdit = null; if (v === 'agenda') U.todayScroll = true; render(); },
   role: v => { U.roleView = v; U.view = 'list'; U.todayScroll = true; render(); },
   filter: v => { U.agFilter = v; U.todayScroll = true; render(); },
+  togglePast: () => { U.showPast = !U.showPast; U.todayScroll = true; render(); },
   open: v => { U.view = 'detail'; U.sel = v; U.confirmDel = false; U.cancelAsk = false; U.shareNote = ''; U.justCreated = false; render(); },
   backList: () => { U.view = 'list'; U.sel = null; U.selPlayer = null; U.justCreated = false; render(); },
   backDetail: () => { U.view = 'detail'; U.pEdit = null; U.addParty = false; U.xEdit = null; render(); },
@@ -1819,6 +1840,8 @@ const A = {
   },
   setMine: v => {
     const k = me(), id = U.sel, ev = getEv(id);
+    if (!ev) return;
+    if (ev.date < isoToday() && !capView()) return toast('Événement passé : réponses figées.');
     if (v === 'no' || !ev.max) return safe(() => updateDoc(evRef(id), { ['r.' + k]: v }));
     safe(() => runTransaction(db, async tx => {
       const snap = await tx.get(evRef(id)); const d = snap.data() || {}; const r = d.r || {};
