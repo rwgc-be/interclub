@@ -159,7 +159,7 @@ const firebaseConfig = {
 };
 // Administrateurs (création des équipes et des capitaines). Même liste que dans firestore.rules.
 const ADMINS = ["francisberlier@gmail.com"];
-const VERSION = "v5.9";   // a incrementer a chaque publication
+const VERSION = "v6.0";   // a incrementer a chaque publication
 /* ========================================================= */
 
 const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -1635,7 +1635,8 @@ function vFiche(k, withBack) {
   if (X.stab9.length) tiles.push({ l: 'Stableford 9 trous', v: fmtN(avg(X.stab9)), s: 'moyenne · ' + X.stab9.length + ' partie(s)' });
   tiles.push({ l: 'Putts par trou', v: PP.holes ? (PP.putts / PP.holes).toFixed(2).replace('.', ',') : '—', s: PP.rounds ? 'sur ' + PP.rounds + ' parcours' : 'aucune donnée' });
   if (X.pb.rounds) tiles.push({ l: 'Pars et birdies', v: pbAvg(X.pb.pars, X.pb.rounds) + ' / ' + pbAvg(X.pb.birdies, X.pb.rounds), s: 'moyenne par match · ' + X.pb.rounds + ' match' + (X.pb.rounds > 1 ? 's' : '') });
-  if (X.sk.n) tiles.push({ l: 'Approche et putting', v: fmtN((X.sk.a + X.sk.p) / X.sk.n), s: 'moyenne · app. ' + fmtN(X.sk.a / X.sk.n) + ' · putt ' + fmtN(X.sk.p / X.sk.n) + ' · meilleur ' + X.sk.best });
+  tiles.push({ l: 'Approche et putting', v: X.sk.n ? fmtN((X.sk.a + X.sk.p) / X.sk.n) : '—',
+    s: X.sk.n ? 'moyenne · app. ' + fmtN(X.sk.a / X.sk.n) + ' · putt ' + fmtN(X.sk.p / X.sk.n) + ' · meilleur ' + X.sk.best : 'aucune donnée' });
   tiles.push({ l: 'Greens en régulation', v: PP.girHoles ? pct(PP.girOk, PP.girHoles) : '—', s: PP.girHoles ? PP.girOk + ' / ' + PP.girHoles + ' trous' : 'aucune donnée' });
   tiles.push({ l: 'Approche-put', v: pct(PP.udOk, PP.udTry), s: PP.udOk + ' / ' + PP.udTry + ' réussis' });
   tiles.push({ l: 'Sandy', v: pct(PP.sOk, PP.sTry), s: PP.sOk + ' / ' + PP.sTry + ' réussis' });
