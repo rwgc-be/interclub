@@ -163,7 +163,7 @@ const firebaseConfig = {
 };
 // Administrateurs (création des équipes et des capitaines). Même liste que dans firestore.rules.
 const ADMINS = ["francisberlier@gmail.com"];
-const VERSION = "v7.1";   // a incrementer a chaque publication
+const VERSION = "v7.5";   // a incrementer a chaque publication
 /* ========================================================= */
 
 const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -894,6 +894,12 @@ function vNav() {
   }).join('')}</nav>`;
 }
 
+/* Statut suivant dans le cycle A repondre -> Present -> Absent. */
+const nextR = v => v === 'none' ? 'yes' : v === 'yes' ? 'no' : 'none';
+/* Changer le statut de quelqu'un d'autre demande confirmation : sur une
+   longue liste qu'on fait defiler au doigt, un appui involontaire passe
+   inapercu. Sa propre ligne reste directe. */
+const needAsk = (ev, k) => k !== me();
 /* ---------- agenda ---------- */
 function vAgenda() {
   const today = isoToday(), mk = me(), cap = capView();
@@ -1159,9 +1165,14 @@ function vDetail(ev) {
     <span class="grow"><span class="t15" style="font-weight:800">Résultats</span><span class="small">${esc(resSummary)}</span></span>${ICON.chev}</button>` : ''}
   <div style="display:flex;flex-direction:column;gap:10px">
     <div class="toprow"><div style="font-size:16px;font-weight:800">Réponses</div><div class="small">${yes}${ev.max ? ' / ' + ev.max : ''} présents · ${no} absents · ${pool.length - yes - no} sans réponse</div></div>
-    ${canSet ? `<div class="small">Capitaine : touche le statut d’un joueur pour le changer (À répondre → Présent → Absent).${ev.free ? ' Tu peux ainsi compléter un départ à la place d’un joueur.' : ''}</div>` : ''}
-    <div class="list">${rows.map(x => `<div class="li"><div class="av">${esc(initials(nameOf(x.k)))}</div><div class="grow t14" style="font-weight:600">${esc(nameOf(x.k))}${x.k === mk ? ' (toi)' : ''}</div>
-      ${canSet ? `<button class="pill ${x.v} click" data-a="cycle" data-v="${esc(x.k)}" aria-label="Changer la présence de ${esc(nameOf(x.k))}">${ST[x.v]}</button>` : `<span class="pill ${x.v}">${ST[x.v]}</span>`}</div>`).join('') || '<div class="li small">Aucun joueur.</div>'}</div>
+    ${canSet ? `<div class="small">Capitaine : touche le statut d’un joueur pour le changer (À répondre → Présent → Absent). Un deuxième appui confirme.</div>` : ''}
+    <div class="list">${rows.map(x => {
+      const ask = U.askCycle === x.k, nxt = nextR(x.v);
+      return `<div class="li" style="${ask ? 'background:var(--gl)' : ''}"><div class="av">${esc(initials(nameOf(x.k)))}</div><div class="grow t14" style="font-weight:600">${esc(nameOf(x.k))}${x.k === mk ? ' (toi)' : ''}${ask ? `<span class="small" style="font-weight:600">Le marquer <b>${ST[nxt].toLowerCase()}</b> ?</span>` : ''}</div>
+      ${!canSet ? `<span class="pill ${x.v}">${ST[x.v]}</span>`
+        : ask ? `<button class="pill click" data-a="askCycle" data-v="">Non</button><button class="pill ${nxt} click" data-a="cycle" data-v="${esc(x.k)}" style="margin-left:4px">Oui</button>`
+        : `<button class="pill ${x.v} click" data-a="${needAsk(ev, x.k) ? 'askCycle' : 'cycle'}" data-v="${esc(x.k)}" aria-label="Changer la présence de ${esc(nameOf(x.k))}">${ST[x.v]}</button>`}</div>`;
+    }).join('') || '<div class="li small">Aucun joueur.</div>'}</div>
   </div>
   ${!ev.cancel && U.justCreated ? `<div class="newbox"><div class="t14" style="font-weight:800">${ev.open ? 'Appel lancé' : 'Événement créé'}</div>
     <div class="small">${ev.open ? 'Il apparaît dans l’agenda de tout l’effectif. Préviens le groupe pour que quelqu’un le voie aujourd’hui.' : 'Préviens l’équipe pour que personne ne le manque.'}</div></div>` : ''}
@@ -1830,7 +1841,7 @@ const A = {
   togglePast: () => { U.showPast = !U.showPast; U.todayScroll = true; render(); },
   toggleMine: () => { U.showMine = !U.showMine; U.todayScroll = true; render(); },
   clearTgl: () => { U.showMine = false; U.showPast = false; U.todayScroll = true; render(); },
-  open: v => { U.view = 'detail'; U.sel = v; U.confirmDel = false; U.cancelAsk = false; U.shareNote = ''; U.justCreated = false; render(); },
+  open: v => { U.view = 'detail'; U.sel = v; U.confirmDel = false; U.cancelAsk = false; U.shareNote = ''; U.justCreated = false; U.askCycle = null; render(); },
   backList: () => { U.view = 'list'; U.sel = null; U.selPlayer = null; U.justCreated = false; render(); },
   backDetail: () => { U.view = 'detail'; U.pEdit = null; U.addParty = false; U.xEdit = null; render(); },
   openResults: () => { U.view = 'results'; U.pEdit = null; U.addParty = false; U.xEdit = null; render(); },
@@ -1868,7 +1879,8 @@ const A = {
   },
   addSlot: () => { U.f.slots = (U.f.slots || []).concat([{ date: U.f.date || '', time: '' }]); render(); },
   delSlot: i => { U.f.slots.splice(Number(i), 1); render(); },
-  cycle: k => { const ev0 = getEv(U.sel); if (ev0.max && ((ev0.r || {})[k] || 'none') === 'none' && isFull(ev0)) toast('Attention : maximum dépassé (' + ev0.max + ')'); const ev = ev0; const v = (ev.r || {})[k] || 'none'; const n = v === 'none' ? 'yes' : v === 'yes' ? 'no' : 'none'; safe(() => updateDoc(evRef(U.sel), { ['r.' + k]: n === 'none' ? deleteField() : n })); },
+  askCycle: v => { U.askCycle = v || null; render(); },
+  cycle: k => { U.askCycle = null; const ev0 = getEv(U.sel); if (ev0.max && ((ev0.r || {})[k] || 'none') === 'none' && isFull(ev0)) toast('Attention : maximum dépassé (' + ev0.max + ')'); const ev = ev0; const v = (ev.r || {})[k] || 'none'; const n = v === 'none' ? 'yes' : v === 'yes' ? 'no' : 'none'; safe(() => updateDoc(evRef(U.sel), { ['r.' + k]: n === 'none' ? deleteField() : n })); },
   toggleImp: () => {
     const ev = getEv(U.sel); if (!ev) return;
     safe(() => updateDoc(evRef(U.sel), { imp: ev.imp ? deleteField() : true }),
