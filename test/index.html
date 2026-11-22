@@ -55,12 +55,8 @@ h2{margin:0;font-size:23px;font-weight:800;letter-spacing:-.4px}
 .seg{display:grid;gap:4px;padding:4px;background:#EAEAE3;border-radius:12px}
 .seg button{height:40px;border:none;border-radius:9px;font-size:13px;font-weight:700;background:transparent;color:var(--mut)}
 .seg button.on{background:#fff;color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
-.chips{display:flex;flex-wrap:nowrap;gap:5px;padding:0 16px 6px;flex-shrink:0;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
-.chips::-webkit-scrollbar{display:none}
-.chips .chip{flex:0 0 auto}
-.chiprow{display:flex;align-items:center;gap:8px;padding:0 16px 6px;flex-shrink:0}
-.chiprow .chips{padding:0;flex:1;min-width:0}
-.pastbtn{flex:0 0 auto;border:1px solid var(--line);background:var(--card);border-radius:999px;padding:6px 10px;font-size:11px;font-weight:700;color:#6A6A64;white-space:nowrap}
+.chips{display:flex;flex-wrap:wrap;gap:3px;padding:0 16px 6px;flex-shrink:0}
+.pastbtn{height:26px;padding:0 8px;border-radius:13px;white-space:nowrap;font-size:11px;font-weight:700;border:1px solid var(--line2);background:#fff;color:#6A6A64}
 .pastbtn.on{background:var(--gl);border-color:var(--g);color:var(--gd)}
 .hdr{padding:calc(8px + env(safe-area-inset-top)) 16px 8px;gap:0}
 .ttl{font-size:18px;font-weight:800;color:var(--ink);letter-spacing:-.2px}
@@ -79,7 +75,7 @@ h2{margin:0;font-size:23px;font-weight:800;letter-spacing:-.4px}
 #fx i{position:absolute;top:-24px;display:block;animation:fxfall linear infinite;will-change:transform}
 @keyframes fxfall{0%{transform:translate3d(0,-24px,0) rotate(0)}100%{transform:translate3d(var(--dx,20px),105vh,0) rotate(var(--rot,180deg))}}
 @media (prefers-reduced-motion: reduce){#fx{display:none}}
-.chip{flex-shrink:0;height:30px;padding:0 11px;border-radius:15px;white-space:nowrap;font-size:12px;font-weight:700;border:1px solid var(--line2);background:#fff;color:var(--ink2)}
+.chip{flex-shrink:0;height:26px;padding:0 8px;border-radius:13px;white-space:nowrap;font-size:11px;font-weight:700;border:1px solid var(--line2);background:#fff;color:var(--ink2)}
 .chip.on{background:var(--ink);border-color:var(--ink);color:#fff}
 .tabs{display:grid;gap:6px}
 .tab{height:40px;border-radius:10px;font-size:12px;font-weight:800;padding:0 4px;border:2px solid #E2E2DC;background:#fff;color:var(--ink2)}
@@ -165,7 +161,7 @@ const firebaseConfig = {
 };
 // Administrateurs (création des équipes et des capitaines). Même liste que dans firestore.rules.
 const ADMINS = ["francisberlier@gmail.com"];
-const VERSION = "v6.5";   // a incrementer a chaque publication
+const VERSION = "v6.6";   // a incrementer a chaque publication
 /* ========================================================= */
 
 const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -217,8 +213,8 @@ const SKILL_RULES = 'Tours de ' + SKILL_HOLES + ' trous à la pépinière, autan
 /* Les deux parcours du club ; 'Autre' laisse la main a un lieu libre. */
 const TERRAINS = ['La Marache', 'Le Lion'];
 const FILTERS = [
-  { k: 'all', l: 'Tous' }, { k: 'ic', l: 'Interclubs' }, { k: 'friendly', l: 'Amicaux' }, { k: 'mp', l: 'Match play' }, { k: 'cal', l: 'Échéances' }, { k: 'course', l: 'Parcours' },
-  { k: 'training', l: 'Entraînements' }, { k: 'lesson', l: 'Cours' }, { k: 'social', l: 'Social' }
+  { k: 'all', l: 'Tous' }, { k: 'ic', l: 'Interclub' }, { k: 'friendly', l: 'Amicaux' }, { k: 'mp', l: 'Match play' }, { k: 'cal', l: 'Sélection' }, { k: 'course', l: 'Parcours' },
+  { k: 'training', l: 'Practice' }, { k: 'lesson', l: 'Cours' }, { k: 'social', l: 'Social' }
 ];
 const FMAP = { ic: ['interclub'], friendly: ['friendly'], mp: ['matchplay', 'redtide'], cal: ['selection'], course: ['course18', 'course9'], training: ['training', 'skills'], lesson: ['lesson'], social: ['meal', 'party', 'meeting', 'trip'] };
 const M18 = ['1 up','2 up','2&1','3&1','3&2','4&2','4&3','5&3','5&4','6&4','6&5','7&5','7&6','8&6','8&7','9&7','9&8','10&8'];
@@ -932,8 +928,8 @@ function vAgenda() {
   return vHeader('Agenda', 'openAdd', cap ? 'Ajouter un événement' : 'Organiser une partie')
     + (vInstall() ? `<div style="padding:0 16px 6px">${vInstall()}</div>` : '')
     + vCalls()
-    + `<div class="chiprow"><div class="chips">${FILTERS.map(f => `<button class="chip ${U.agFilter === f.k ? 'on' : ''}" data-a="filter" data-v="${f.k}">${f.l}</button>`).join('')}</div>
-    ${nPast ? `<button class="pastbtn ${U.showPast ? 'on' : ''}" data-a="togglePast" aria-pressed="${U.showPast ? 'true' : 'false'}">${U.showPast ? '☑' : '☐'} Passé ${nPast}</button>` : ''}</div>
+    + `<div class="chips">${FILTERS.map(f => `<button class="chip ${U.agFilter === f.k ? 'on' : ''}" data-a="filter" data-v="${f.k}">${f.l}</button>`).join('')}${
+      nPast ? `<button class="pastbtn ${U.showPast ? 'on' : ''}" data-a="togglePast" aria-pressed="${U.showPast ? 'true' : 'false'}">${U.showPast ? '☑' : '☐'} Passé ${nPast}</button>` : ''}</div>
     <div class="scroll" id="scroll" style="gap:8px">
     ${!past.length && !fut.length ? `<div class="small center" style="padding:24px">Aucun événement à venir${U.agFilter !== 'all' ? ' de ce type' : ''}.${nPast && !U.showPast ? '<br>' + nPast + ' passé' + (nPast > 1 ? 's' : '') + ' — touche « Passé » pour les voir.' : ''}</div>` : ''}
     ${groups(past)}
