@@ -56,8 +56,10 @@ h2{margin:0;font-size:23px;font-weight:800;letter-spacing:-.4px}
 .seg button{height:40px;border:none;border-radius:9px;font-size:13px;font-weight:700;background:transparent;color:var(--mut)}
 .seg button.on{background:#fff;color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
 .chips{display:flex;flex-wrap:wrap;gap:3px;padding:0 16px 6px;flex-shrink:0}
-.pastbtn{height:26px;padding:0 8px;border-radius:13px;white-space:nowrap;font-size:11px;font-weight:700;border:1px solid var(--line2);background:#fff;color:#6A6A64}
-.pastbtn.on{background:var(--gl);border-color:var(--g);color:var(--gd)}
+.tgl{width:30px;height:26px;flex-shrink:0;border-radius:13px;border:1px solid var(--line2);background:#fff;color:#8A8A84;display:inline-flex;align-items:center;justify-content:center;padding:0}
+.tgl.on{background:var(--gl);border-color:var(--g);color:var(--gd)}
+.fnote{display:flex;align-items:center;gap:8px;padding:0 16px 6px;font-size:11px;font-weight:600;color:var(--gd);flex-shrink:0}
+.fnote button{border:none;background:transparent;color:#6A6A64;font-size:11px;font-weight:700;text-decoration:underline;padding:0}
 .hdr{padding:calc(8px + env(safe-area-inset-top)) 16px 8px;gap:0}
 .ttl{font-size:18px;font-weight:800;color:var(--ink);letter-spacing:-.2px}
 .tsel{font-size:18px;font-weight:800;color:var(--ink);border:none;background:transparent;padding:0 18px 0 0;max-width:100%;min-width:0;appearance:none;-webkit-appearance:none;background-image:linear-gradient(45deg,transparent 50%,#5A5A55 50%),linear-gradient(135deg,#5A5A55 50%,transparent 50%);background-position:calc(100% - 7px) 55%,calc(100% - 2px) 55%;background-size:5px 5px;background-repeat:no-repeat;text-overflow:ellipsis}
@@ -161,7 +163,7 @@ const firebaseConfig = {
 };
 // Administrateurs (création des équipes et des capitaines). Même liste que dans firestore.rules.
 const ADMINS = ["francisberlier@gmail.com"];
-const VERSION = "v6.6";   // a incrementer a chaque publication
+const VERSION = "v7.6";   // a incrementer a chaque publication
 /* ========================================================= */
 
 const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -200,6 +202,8 @@ function ink(hex) {
   return (1.05 / (L + 0.05)) >= ((L + 0.05) / 0.05) ? '#fff' : '#111';
 }
 const PLAYER_TYPES = ['matchplay', 'course18', 'course9'];
+/* Un appel a tous, c'est un depart : toujours 4. Seul un capitaine ajuste apres coup. */
+const OPEN_CALL_MAX = 4;
 /* Concours d'approche et de putting a la pepiniere, sur 6 trous. */
 const isSkills = t => t === 'skills';
 const SKILL_HOLES = 6;
@@ -224,6 +228,8 @@ const ICON = {
   plus: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
   back: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>',
   chev: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8A8A84" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
+  mine: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.2 2.7-5.6 6-5.6 1 0 2 .2 2.8.6"/><path d="M15 17.5l2 2 4-4.5"/></svg>',
+  hist: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.2 10a9 9 0 1 1 .8 5"/><path d="M3 5v5h5"/><path d="M12 7.5V12l3 1.8"/></svg>',
   share: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3M8 7l4-4 4 4"/><path d="M4 13v6a2 2 0 002 2h12a2 2 0 002-2v-6"/></svg>',
   up: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>',
   down: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>',
@@ -317,8 +323,16 @@ function sendButtons(name, email, pwd, phone, teamTitle, key, tid) {
   const mk = key ? ` data-mark="${esc(key)}|${esc(tid || '')}"` : '';
   const a = (href, label, primary) => `<a class="btn ${primary ? 'primary' : ''}" style="display:flex;align-items:center;justify-content:center;text-decoration:none;font-size:14px" href="${esc(href)}" target="_blank" rel="noopener"${mk}>${label}</a>`;
   const copy = `<button class="btn" style="font-size:14px" data-a="copyAccess" data-v="${cv}"${mk}>Copier le message</button>`;
-  if (phone) return `${a(waHref(phone) + '?text=' + encodeURIComponent(m.body), 'Envoyer par WhatsApp au ' + esc(fmtIntl(phone)), true)}<div class="small">Le message part de ton WhatsApp vers le n° ci-dessus. Vérifie que c’est bien celui du joueur.</div><div class="row2">${a(gmail, 'Par Gmail')}${copy}</div>`;
-  return `<div class="row2">${a(gmail, 'Envoyer par Gmail', true)}${a(mailto, 'Autre messagerie')}</div>${copy}<div class="small">Ajoute son n° de GSM pour pouvoir envoyer par WhatsApp.</div>`;
+  /* Joueur mineur : le meme message part aussi vers le parent. */
+  const g = key ? guardOf(key) : {};
+  const gBloc = g.phone || g.email
+    ? `<div style="border-top:1px solid var(--line);padding-top:8px;display:flex;flex-direction:column;gap:6px">
+       <div class="small" style="font-weight:700">Envoyer aussi à ${esc(g.name || 'son parent')}</div>
+       ${g.phone ? a(waHref(g.phone) + '?text=' + encodeURIComponent(m.body), 'WhatsApp au ' + esc(fmtIntl(g.phone))) : ''}
+       ${g.email ? a('https://mail.google.com/mail/?view=cm&fs=1&to=' + encodeURIComponent(g.email) + '&su=' + encodeURIComponent(m.subject) + '&body=' + encodeURIComponent(m.body), 'Gmail à ' + esc(g.email)) : ''}</div>`
+    : '';
+  if (phone) return `${a(waHref(phone) + '?text=' + encodeURIComponent(m.body), 'Envoyer par WhatsApp au ' + esc(fmtIntl(phone)), true)}<div class="small">Le message part de ton WhatsApp vers le n° ci-dessus. Vérifie que c’est bien celui du joueur.</div><div class="row2">${a(gmail, 'Par Gmail')}${copy}</div>${gBloc}`;
+  return `<div class="row2">${a(gmail, 'Envoyer par Gmail', true)}${a(mailto, 'Autre messagerie')}</div>${copy}<div class="small">Ajoute son n° de GSM pour pouvoir envoyer par WhatsApp.</div>${gBloc}`;
 }
 
 /* ---------- state ---------- */
@@ -491,6 +505,10 @@ const telHref = ph => 'tel:' + String(ph).replace(/[^\d+]/g, '');
 // Numéro international sans « + » (format wa.me). Numéros belges : 0475… / 475… → 32475…
 const waNum = ph => { let d = String(ph || '').replace(/[^\d+]/g, ''); if (d.startsWith('+')) d = d.slice(1); else if (d.startsWith('00')) d = d.slice(2); else if (d.startsWith('0')) d = '32' + d.slice(1); else if (/^4\d{8}$/.test(d)) d = '32' + d; return d; };
 const waHref = ph => 'https://wa.me/' + waNum(ph);
+/* Parent ou responsable d'un joueur mineur : contact uniquement,
+   stocke dans la fiche contact, lisible des seuls capitaines. */
+const guardOf = k => (S.contacts[k] || {}).guardian || {};
+const isMinor = k => { const a = ageOf(bornOf(k)); return a !== null && a < 18; };
 const fmtIntl = ph => { const d = waNum(ph); return d.startsWith('32') && d.length === 11 ? '+32 ' + d.slice(2, 5) + ' ' + d.slice(5, 7) + ' ' + d.slice(7, 9) + ' ' + d.slice(9) : '+' + d; };
 const okPhone = ph => !ph || /^[+0-9][0-9 ./()-]{7,}$/.test(String(ph).trim());
 function setPhone(k, ph, tid) { return setDoc(doc(db, 'teams', tid || S.teamId, 'contacts', k), { phone: String(ph || '').trim() }, { merge: true }); }
@@ -888,6 +906,12 @@ function vNav() {
   }).join('')}</nav>`;
 }
 
+/* Statut suivant dans le cycle A repondre -> Present -> Absent. */
+const nextR = v => v === 'none' ? 'yes' : v === 'yes' ? 'no' : 'none';
+/* Changer le statut de quelqu'un d'autre demande confirmation : sur une
+   longue liste qu'on fait defiler au doigt, un appui involontaire passe
+   inapercu. Sa propre ligne reste directe. */
+const needAsk = (ev, k) => k !== me();
 /* ---------- agenda ---------- */
 function vAgenda() {
   const today = isoToday(), mk = me(), cap = capView();
@@ -895,6 +919,7 @@ function vAgenda() {
   const evs = S.events.filter(e => {
     if (e.free && !cap && !(e.invited || []).includes(mk)) return false;
     if (U.agFilter !== 'all' && !FMAP[U.agFilter].includes(e.type)) return false;
+    if (U.showMine && (e.r || {})[mk] !== 'yes') return false;   // seulement mes inscriptions
     return true;
   }).sort((a, b) => ((a.date || '') + (a.time || '')).localeCompare((b.date || '') + (b.time || '')));
   const past = [], fut = [];
@@ -928,10 +953,11 @@ function vAgenda() {
   return vHeader('Agenda', 'openAdd', cap ? 'Ajouter un événement' : 'Organiser une partie')
     + (vInstall() ? `<div style="padding:0 16px 6px">${vInstall()}</div>` : '')
     + vCalls()
-    + `<div class="chips">${FILTERS.map(f => `<button class="chip ${U.agFilter === f.k ? 'on' : ''}" data-a="filter" data-v="${f.k}">${f.l}</button>`).join('')}${
-      nPast ? `<button class="pastbtn ${U.showPast ? 'on' : ''}" data-a="togglePast" aria-pressed="${U.showPast ? 'true' : 'false'}">${U.showPast ? '☑' : '☐'} Passé ${nPast}</button>` : ''}</div>
+    + `<div class="chips">${FILTERS.map(f => `<button class="chip ${U.agFilter === f.k ? 'on' : ''}" data-a="filter" data-v="${f.k}">${f.l}</button>`).join('')}<button class="tgl ${U.showMine ? 'on' : ''}" data-a="toggleMine" aria-pressed="${U.showMine ? 'true' : 'false'}" title="Seulement les événements où je suis inscrit" aria-label="Seulement les événements où je suis inscrit">${ICON.mine}</button>
+    <button class="tgl ${U.showPast ? 'on' : ''}" data-a="togglePast" aria-pressed="${U.showPast ? 'true' : 'false'}" title="Afficher aussi l’historique" aria-label="Afficher aussi l’historique">${ICON.hist}</button></div>
+    ${U.showMine || U.showPast ? `<div class="fnote">${[U.showMine ? 'Mes inscriptions' : '', U.showPast ? 'historique compris' : ''].filter(Boolean).join(' · ')}<button data-a="clearTgl">tout afficher</button></div>` : ''}
     <div class="scroll" id="scroll" style="gap:8px">
-    ${!past.length && !fut.length ? `<div class="small center" style="padding:24px">Aucun événement à venir${U.agFilter !== 'all' ? ' de ce type' : ''}.${nPast && !U.showPast ? '<br>' + nPast + ' passé' + (nPast > 1 ? 's' : '') + ' — touche « Passé » pour les voir.' : ''}</div>` : ''}
+    ${!past.length && !fut.length ? `<div class="small center" style="padding:24px">Aucun événement à venir${U.showMine ? ' où tu es inscrit' : U.agFilter !== 'all' ? ' de ce type' : ''}.${nPast && !U.showPast ? '<br>' + nPast + ' dans l’historique — touche l’horloge pour les voir.' : ''}</div>` : ''}
     ${groups(past)}
     <div class="today" id="today-mark"><span>Aujourd’hui · ${JOURS_LONG[now.getDay()]} ${now.getDate()} ${MOIS[now.getMonth()].toLowerCase()}</span><i></i></div>
     ${vBirthday(now)}
@@ -1080,10 +1106,10 @@ function vParticipation(ev, my) {
   }
   const other = ev.group ? groupOf(ev).find(x => x.id !== ev.id && (x.r || {})[mk] === 'yes') : null;
   let info = '', yesBtn;
-  if (my === 'yes') yesBtn = `<button class="btn sel" data-a="setMine" data-v="yes">Je participe</button>`;
+  if (my === 'yes') yesBtn = `<button class="btn sel" data-a="setMine" data-v="yes">Présent</button>`;
   else if (other) { info = `<div class="small">Tu es inscrit au créneau du <b>${esc(slotLabel(other))}</b>. Un seul créneau possible.</div>`; yesBtn = full ? `<button class="btn" disabled style="opacity:.5">Complet</button>` : `<button class="btn" data-a="switchSlot" data-v="${esc(other.id)}">Prendre ce créneau</button>`; }
   else if (full) { info = '<div class="small">Le nombre maximum de joueurs est atteint.</div>'; yesBtn = `<button class="btn" disabled style="opacity:.5">Complet</button>`; }
-  else yesBtn = `<button class="btn" data-a="setMine" data-v="yes">Je participe</button>`;
+  else yesBtn = `<button class="btn" data-a="setMine" data-v="yes">Présent</button>`;
   const left = ev.max ? ev.max - yesCount(ev) : null;
   return `<div class="card"><div class="toprow"><div class="t14">Ta participation</div>${ev.max ? `<span class="pill ${full ? 'no' : 'yes'}">${full ? 'Complet' : left + ' place' + (left > 1 ? 's' : '') + ' libre' + (left > 1 ? 's' : '')} · ${yesCount(ev)} / ${ev.max}</span>` : ''}</div>
   ${info}<div class="flex">${yesBtn}<button class="btn ${my === 'no' ? 'selno' : ''}" data-a="setMine" data-v="no">Absent</button></div></div>`;
@@ -1103,7 +1129,9 @@ function vDetail(ev) {
   let yes = 0, no = 0;
   const rows = pool.map(k => { const v = r[k] || 'none'; if (v === 'yes') yes++; if (v === 'no') no++; return { k, v, o: v === 'yes' ? 0 : v === 'none' ? 1 : 2 }; })
     .sort((a, b) => a.o - b.o || nameOf(a.k).localeCompare(nameOf(b.k), 'fr'));
-  const canSet = cap && !ev.free && !ev.cancel;
+  /* Le capitaine fixe le statut de n'importe qui, parties libres comprises :
+     utile pour completer un depart quand personne ne repond. */
+  const canSet = cap && !ev.cancel;
   /* Partie libre : l'organisateur, et le capitaine pour faire le menage
      dans l'agenda. Modifier reste reserve a l'organisateur.
      L'admin supprime tout, y compris depuis la vue Joueur. */
@@ -1133,7 +1161,7 @@ function vDetail(ev) {
     <div class="sub" style="font-weight:500">${longDate(ev.date)}${ev.time ? ' · ' + esc(timeText(ev)) : ''}</div>
     ${ev.place ? `<div class="sub" style="font-weight:500">${esc(ev.place)}</div>` : ''}
     ${ev.free ? `<div style="font-size:13px;font-weight:700;color:var(--or)">${ev.open ? 'Appel à tous' : 'Partie libre'} · organisé${ev.open ? '' : 'e'} par ${esc(nameOf(ev.org))}</div>` : ''}
-    ${ev.open && ev.org === mk ? '<div class="small">Les joueurs intéressés répondent « Je participe ». Compose ensuite les parties dans Résultats.</div>' : ''}
+    ${ev.open && ev.org === mk ? '<div class="small">Les joueurs intéressés répondent « Présent ». Compose ensuite les parties dans Résultats.</div>' : ''}
     ${ev.notes ? `<div class="small">${esc(ev.notes)}</div>` : ''}
   </div>
   ${ev.cancel ? `<div class="cxbox"><div class="t14" style="font-weight:800">Événement annulé</div>
@@ -1149,9 +1177,14 @@ function vDetail(ev) {
     <span class="grow"><span class="t15" style="font-weight:800">Résultats</span><span class="small">${esc(resSummary)}</span></span>${ICON.chev}</button>` : ''}
   <div style="display:flex;flex-direction:column;gap:10px">
     <div class="toprow"><div style="font-size:16px;font-weight:800">Réponses</div><div class="small">${yes}${ev.max ? ' / ' + ev.max : ''} présents · ${no} absents · ${pool.length - yes - no} sans réponse</div></div>
-    ${canSet ? '<div class="small">Capitaine : touche le statut d’un joueur pour le changer (À répondre → Présent → Absent).</div>' : ''}
-    <div class="list">${rows.map(x => `<div class="li"><div class="av">${esc(initials(nameOf(x.k)))}</div><div class="grow t14" style="font-weight:600">${esc(nameOf(x.k))}${x.k === mk ? ' (toi)' : ''}</div>
-      ${canSet ? `<button class="pill ${x.v} click" data-a="cycle" data-v="${esc(x.k)}" aria-label="Changer la présence de ${esc(nameOf(x.k))}">${ST[x.v]}</button>` : `<span class="pill ${x.v}">${ST[x.v]}</span>`}</div>`).join('') || '<div class="li small">Aucun joueur.</div>'}</div>
+    ${canSet ? `<div class="small">Capitaine : touche le statut d’un joueur pour le changer (À répondre → Présent → Absent). Un deuxième appui confirme.</div>` : ''}
+    <div class="list">${rows.map(x => {
+      const ask = U.askCycle === x.k, nxt = nextR(x.v);
+      return `<div class="li" style="${ask ? 'background:var(--gl)' : ''}"><div class="av">${esc(initials(nameOf(x.k)))}</div><div class="grow t14" style="font-weight:600">${esc(nameOf(x.k))}${x.k === mk ? ' (toi)' : ''}${ask ? `<span class="small" style="font-weight:600">Le marquer <b>${ST[nxt].toLowerCase()}</b> ?</span>` : ''}</div>
+      ${!canSet ? `<span class="pill ${x.v}">${ST[x.v]}</span>`
+        : ask ? `<button class="pill click" data-a="askCycle" data-v="">Non</button><button class="pill ${nxt} click" data-a="cycle" data-v="${esc(x.k)}" style="margin-left:4px">Oui</button>`
+        : `<button class="pill ${x.v} click" data-a="${needAsk(ev, x.k) ? 'askCycle' : 'cycle'}" data-v="${esc(x.k)}" aria-label="Changer la présence de ${esc(nameOf(x.k))}">${ST[x.v]}</button>`}</div>`;
+    }).join('') || '<div class="li small">Aucun joueur.</div>'}</div>
   </div>
   ${!ev.cancel && U.justCreated ? `<div class="newbox"><div class="t14" style="font-weight:800">${ev.open ? 'Appel lancé' : 'Événement créé'}</div>
     <div class="small">${ev.open ? 'Il apparaît dans l’agenda de tout l’effectif. Préviens le groupe pour que quelqu’un le voie aujourd’hui.' : 'Préviens l’équipe pour que personne ne le manque.'}</div></div>` : ''}
@@ -1168,6 +1201,9 @@ function vDetail(ev) {
         <div class="flex"><button class="btn" data-a="cancelAsk" data-v="0">Retour</button><button class="btn primary" data-a="doCancel">Annuler l’événement</button></div></div>`
       : `<button class="btn" data-a="cancelAsk" data-v="1">Annuler l’événement</button>`) : ''}
   ${canEdit && !ev.cancel ? `<div class="row2"><button class="btn" data-a="editEvent">Modifier</button><button class="btn" data-a="dupEvent">Dupliquer</button></div>` : ''}
+  ${cap && ev.free && !ev.cancel ? `<div class="card" style="gap:6px"><div class="t14" style="font-weight:800">Nombre de joueurs</div>
+    <select class="in" data-f="capMax" data-r="1">${[['2','2 joueurs'],['3','3 joueurs'],['4','4 joueurs'],['5','5 joueurs'],['6','6 joueurs'],['8','8 joueurs'],['','Pas de limite']].map(([v,l]) => `<option value="${v}" ${String(ev.max || '') === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+    <div class="small">${yesCount(ev)} inscrit${yesCount(ev) > 1 ? 's' : ''} actuellement. En tant que capitaine tu peux ajuster la limite d’un appel à tous, même organisé par un autre joueur.</div></div>` : ''}
   ${canDelete && !canEdit && ev.org && ev.org !== mk ? `<div class="small">Organisé par ${esc(nameOf(ev.org))}. Tu peux supprimer, mais pas modifier.</div>` : ''}
   ${canDelete ? (U.confirmDel ? `<div class="card" style="background:var(--redl);border-color:#E8C9C3"><div class="t14" style="color:var(--red)">Supprimer définitivement ?</div><div class="flex"><button class="btn" data-a="confirmDel" data-v="0">Annuler</button><button class="btn" style="background:var(--red);border-color:var(--red);color:#fff" data-a="doDelete">Supprimer</button></div></div>`
     : `<button class="btn danger" data-a="confirmDel" data-v="1">${ev.free ? 'Supprimer la partie' : 'Supprimer l’événement'}</button>`)
@@ -1326,7 +1362,7 @@ function vAdd() {
   ${isMatch ? `<div class="f" style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:var(--ink2)">Formule<div class="row2"><button class="btn ${f.format !== 'foursome' ? 'sel' : ''}" data-a="fset" data-v="format:single">Simple</button><button class="btn ${f.format === 'foursome' ? 'sel' : ''}" data-a="fset" data-v="format:foursome">Foursome</button></div></div>` : ''}
   ${isMatch || isIC ? `<div class="f" style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:var(--ink2)">Nombre de trous<div class="row2"><button class="btn ${f.holes === 9 ? 'sel' : ''}" data-a="fset" data-v="holes:9">9 trous</button><button class="btn ${f.holes !== 9 ? 'sel' : ''}" data-a="fset" data-v="holes:18">18 trous</button></div></div>` : ''}
   ${!cap && !U.edit ? `<div class="f" style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:var(--ink2)">Avec qui ?<div class="row2"><button class="btn ${!f.open ? 'sel' : ''}" data-a="fset" data-v="open:0">${isMatch ? 'Adversaire choisi' : 'Joueurs choisis'}</button><button class="btn ${f.open ? 'sel' : ''}" data-a="fset" data-v="open:1">Appel à tous</button></div>
-    ${f.open ? `<div class="small" style="font-weight:600">Tu annonces ta disponibilité : la proposition est visible de tout l’effectif, et les intéressés répondent « Je participe ».${isMatch ? ' Tu composes ensuite les parties.' : ''}</div>` : ''}</div>` : ''}
+    ${f.open ? `<div class="small" style="font-weight:600">Tu annonces ta disponibilité : la proposition est visible de tout l’effectif, et les intéressés répondent « Présent ».${isMatch ? ' Tu composes ensuite les parties.' : ''}</div>` : ''}</div>` : ''}
   ${!cap && !U.edit && isMatch && !f.open && f.format !== 'foursome' ? `<label class="f">Adversaire<select class="in" data-f="f.opp1">${opts(f.opp1)}</select></label>` : ''}
   ${!cap && !U.edit && isMatch && !f.open && f.format === 'foursome' ? `<label class="f">Ton partenaire<select class="in" data-f="f.partner">${opts(f.partner)}</select></label><div class="row2"><label class="f">Adversaire 1<select class="in" data-f="f.opp1">${opts(f.opp1)}</select></label><label class="f">Adversaire 2<select class="in" data-f="f.opp2">${opts(f.opp2)}</select></label></div>` : ''}
   ${!cap && !U.edit && !isMatch && !f.open ? `<div class="f" style="display:flex;flex-direction:column;gap:8px;font-size:13px;font-weight:700;color:var(--ink2)">Joueurs invités (max. 3)
@@ -1339,10 +1375,7 @@ function vAdd() {
   <label class="f">Date<input class="in" type="date" data-f="f.date" value="${esc(f.date)}"></label>
   <div class="row2"><label class="f">${f.open ? 'Départ à partir de' : 'Heure' + (f.end ? ' de début' : '')}<input class="in" type="time" data-f="f.time" value="${esc(f.time)}"></label><label class="f">${f.open ? 'Jusqu’à (facultatif)' : 'Fin (facultatif)'}<input class="in" type="time" data-f="f.end" value="${esc(f.end)}"></label></div>
   ${f.open && f.time ? `<div class="small">Tu es disponible pour un départ ${f.end ? 'entre ' + esc(f.time) + ' et ' + esc(f.end) : 'à partir de ' + esc(f.time)}.</div>` : ''}
-  ${f.open ? `<label class="f">Joueurs par départ<select class="in" data-f="f.max" data-r="1">${
-    ['2', '3', '4'].map(n => `<option value="${n}" ${String(f.max) === n ? 'selected' : ''}>${n} joueurs</option>`).join('')
-  }<option value="" ${f.max ? '' : 'selected'}>Pas de limite</option></select></label>
-  <div class="small">${f.max ? 'Toi + ' + (Number(f.max) - 1) + ' autre' + (Number(f.max) > 2 ? 's' : '') + '. L’inscription se ferme une fois le départ complet.' : 'Autant de joueurs que tu veux : à toi de composer les départs ensuite.'}</div>` : ''}
+  ${f.open ? `<div class="small">Un départ, <b>4 joueurs</b> : toi + 3 autres. L’inscription se ferme une fois le départ complet. Un capitaine peut élargir la limite si besoin.</div>` : ''}
   ${cap && !U.edit ? `<label class="f">Nombre maximum de joueurs (facultatif)<input class="in" type="number" min="1" inputmode="numeric" data-f="f.max" value="${esc(f.max)}" placeholder="illimité"></label>
   <div style="display:flex;flex-direction:column;gap:8px"><div style="font-size:13px;font-weight:700;color:var(--ink2)">Créneaux liés (facultatif)</div>
   ${(f.slots || []).map((sl, i) => `<div class="flex" style="align-items:center"><input class="in" type="date" data-f="slot.${i}.date" value="${esc(sl.date)}" aria-label="Date du créneau ${i + 2}"><input class="in" type="time" data-f="slot.${i}.time" value="${esc(sl.time)}" aria-label="Heure du créneau ${i + 2}"><button class="mini" style="flex:0 0 34px" data-a="delSlot" data-v="${i}" aria-label="Retirer ce créneau">✕</button></div>`).join('')}
@@ -1389,6 +1422,14 @@ function vSquad() {
     ${U.mBorn && ageOf(U.mBorn) !== null ? `<div class="small">${ageOf(U.mBorn)} ans${daysToBirthday(U.mBorn) === 0 ? ' · c’est son anniversaire aujourd’hui 🎂' : daysToBirthday(U.mBorn) <= 30 ? ' · anniversaire dans ' + daysToBirthday(U.mBorn) + ' jour' + (daysToBirthday(U.mBorn) > 1 ? 's' : '') : ''}</div>` : ''}
     <label class="f">N° de GSM (WhatsApp)<input class="in" type="tel" inputmode="tel" data-f="mPhone" value="${esc(U.mPhone)}" placeholder="ex. 0475 12 34 56"></label>
     ${!isNew && U.mPhone ? `<div class="flex"><a class="btn center" style="display:flex;align-items:center;justify-content:center;text-decoration:none" href="${esc(telHref(U.mPhone))}">Appeler</a><a class="btn center" style="display:flex;align-items:center;justify-content:center;text-decoration:none" href="${esc(waHref(U.mPhone))}" target="_blank" rel="noopener">WhatsApp</a></div>` : ''}
+    <div style="border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:8px">
+      <div class="t14" style="font-weight:800">Parent ou responsable${U.mBorn && isMinor(U.mEdit) ? ' · joueur mineur' : ' (facultatif)'}</div>
+      <div class="small">Pour un joueur mineur, les messages qui lui sont destinés partent aussi vers le parent.</div>
+      <label class="f">Nom<input class="in" data-f="mGName" value="${esc(U.mGName || '')}" placeholder="ex. Marie Dupont"></label>
+      <label class="f">N° de GSM (WhatsApp)<input class="in" type="tel" inputmode="tel" data-f="mGPhone" value="${esc(U.mGPhone || '')}" placeholder="ex. 0475 12 34 56"></label>
+      <label class="f">E-mail<input class="in" type="email" inputmode="email" data-f="mGEmail" value="${esc(U.mGEmail || '')}"></label>
+      ${!isNew && U.mGPhone ? `<div class="flex"><a class="btn center" style="display:flex;align-items:center;justify-content:center;text-decoration:none" href="${esc(telHref(U.mGPhone))}">Appeler le parent</a><a class="btn center" style="display:flex;align-items:center;justify-content:center;text-decoration:none" href="${esc(waHref(U.mGPhone))}" target="_blank" rel="noopener">WhatsApp parent</a></div>` : ''}
+    </div>
     ${U.mErr ? `<div class="err">${esc(U.mErr)}</div>` : ''}
     <div class="flex"><button class="btn" data-a="cancelMember">Annuler</button><button class="btn primary" data-a="saveMember">${isNew ? 'Ajouter' : 'Enregistrer'}</button></div>
     ${!isNew && U.mEmail && !(S.team.members[U.mEdit] || {}).demo ? (pwdOf(U.mEdit)
@@ -1406,7 +1447,7 @@ function vSquad() {
   }
   html += `<div class="toprow small" style="padding:0 4px;font-weight:700"><span>Joueur</span><span>Présences</span></div>
   <div class="list">${M.map(p => {
-    const x = St[p.k]; const inner = `<div class="av">${esc(initials(p.name))}</div><div class="grow"><span class="t14">${esc(p.name)}${p.k === me() ? ' (toi)' : ''}</span><span class="small">HCP ${esc(p.hcp || '—')}${(S.team.captains || []).includes(p.k) ? ' · capitaine' : ''}${S.team.members[p.k].demo ? ' · <b style="color:var(--or)">fictif</b>' : ''}${cap && phoneOf(p.k) ? ' · ' + esc(phoneOf(p.k)) : ''}</span></div><div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">${cap && accessState(p.k) && accessState(p.k) !== 'sent' ? `<span class="pill ${ACCESS_BADGE[accessState(p.k)][1]}" style="font-size:11px;padding:3px 8px">${ACCESS_BADGE[accessState(p.k)][0]}</span>` : ''}<span class="t14" style="font-size:13px">${x ? x.yes + ' / ' + x.conv : ''}</span></div>`;
+    const x = St[p.k]; const inner = `<div class="av">${esc(initials(p.name))}</div><div class="grow"><span class="t14">${esc(p.name)}${p.k === me() ? ' (toi)' : ''}</span><span class="small">HCP ${esc(p.hcp || '—')}${(S.team.captains || []).includes(p.k) ? ' · capitaine' : ''}${S.team.members[p.k].demo ? ' · <b style="color:var(--or)">fictif</b>' : ''}${cap && phoneOf(p.k) ? ' · ' + esc(phoneOf(p.k)) : ''}${cap && guardOf(p.k).phone ? ' · parent ' + esc(guardOf(p.k).phone) : ''}</span></div><div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">${cap && accessState(p.k) && accessState(p.k) !== 'sent' ? `<span class="pill ${ACCESS_BADGE[accessState(p.k)][1]}" style="font-size:11px;padding:3px 8px">${ACCESS_BADGE[accessState(p.k)][0]}</span>` : ''}<span class="t14" style="font-size:13px">${x ? x.yes + ' / ' + x.conv : ''}</span></div>`;
     return cap ? `<button class="li" data-a="editMember" data-v="${esc(p.k)}">${inner}</button>` : `<div class="li">${inner}</div>`;
   }).join('') || '<div class="li small">Aucun joueur.</div>'}</div>
   ${cap ? '<div class="small">Le bouton + crée le compte du joueur avec un mot de passe aléatoire, à lui envoyer par WhatsApp. Touche un joueur pour modifier ses infos ou lui renvoyer ses accès.</div>' : ''}
@@ -1818,7 +1859,9 @@ const A = {
   role: v => { U.roleView = v; U.view = 'list'; U.todayScroll = true; render(); },
   filter: v => { U.agFilter = v; U.todayScroll = true; render(); },
   togglePast: () => { U.showPast = !U.showPast; U.todayScroll = true; render(); },
-  open: v => { U.view = 'detail'; U.sel = v; U.confirmDel = false; U.cancelAsk = false; U.shareNote = ''; U.justCreated = false; render(); },
+  toggleMine: () => { U.showMine = !U.showMine; U.todayScroll = true; render(); },
+  clearTgl: () => { U.showMine = false; U.showPast = false; U.todayScroll = true; render(); },
+  open: v => { U.view = 'detail'; U.sel = v; U.confirmDel = false; U.cancelAsk = false; U.shareNote = ''; U.justCreated = false; U.askCycle = null; render(); },
   backList: () => { U.view = 'list'; U.sel = null; U.selPlayer = null; U.justCreated = false; render(); },
   backDetail: () => { U.view = 'detail'; U.pEdit = null; U.addParty = false; U.xEdit = null; render(); },
   openResults: () => { U.view = 'results'; U.pEdit = null; U.addParty = false; U.xEdit = null; render(); },
@@ -1856,7 +1899,8 @@ const A = {
   },
   addSlot: () => { U.f.slots = (U.f.slots || []).concat([{ date: U.f.date || '', time: '' }]); render(); },
   delSlot: i => { U.f.slots.splice(Number(i), 1); render(); },
-  cycle: k => { const ev0 = getEv(U.sel); if (ev0.max && ((ev0.r || {})[k] || 'none') === 'none' && isFull(ev0)) toast('Attention : maximum dépassé (' + ev0.max + ')'); const ev = ev0; const v = (ev.r || {})[k] || 'none'; const n = v === 'none' ? 'yes' : v === 'yes' ? 'no' : 'none'; safe(() => updateDoc(evRef(U.sel), { ['r.' + k]: n === 'none' ? deleteField() : n })); },
+  askCycle: v => { U.askCycle = v || null; render(); },
+  cycle: k => { U.askCycle = null; const ev0 = getEv(U.sel); if (ev0.max && ((ev0.r || {})[k] || 'none') === 'none' && isFull(ev0)) toast('Attention : maximum dépassé (' + ev0.max + ')'); const ev = ev0; const v = (ev.r || {})[k] || 'none'; const n = v === 'none' ? 'yes' : v === 'yes' ? 'no' : 'none'; safe(() => updateDoc(evRef(U.sel), { ['r.' + k]: n === 'none' ? deleteField() : n })); },
   toggleImp: () => {
     const ev = getEv(U.sel); if (!ev) return;
     safe(() => updateDoc(evRef(U.sel), { imp: ev.imp ? deleteField() : true }),
@@ -1891,7 +1935,7 @@ const A = {
     const [k, x] = v.split(':');
     U.f[k] = k === 'home' ? x === '1' : k === 'holes' ? Number(x) : x;
     /* Un appel a tous est un depart : 4 joueurs par defaut, organisateur compris. */
-    if (k === 'open') U.f.max = x === '1' ? '4' : '';
+    if (k === 'open') U.f.max = x === '1' ? String(OPEN_CALL_MAX) : '';
     render();
   },
   guest: k => { const g = U.f.guests || []; const i = g.indexOf(k); if (i >= 0) g.splice(i, 1); else if (g.length < 3) g.push(k); U.f.guests = g; render(); },
@@ -1935,7 +1979,8 @@ const A = {
       if (!ev.open) ev.invited = ev.sideA ? ev.sideA.concat(ev.sideB) : [mk].concat(f.guests);
       if (!ev.title) ev.title = ev.sideA ? names(ev.sideA) + ' vs ' + names(ev.sideB) : typeOf(f.type).l + ' entre amis';
     }
-    if ((cap || f.open) && has(f.max) && String(f.max) !== '') { const m = parseInt(f.max, 10); if (!(m >= 1)) return err('Nombre maximum invalide.'); ev.max = m; }
+    if (f.open) ev.max = OPEN_CALL_MAX;
+    else if (cap && has(f.max) && String(f.max) !== '') { const m = parseInt(f.max, 10); if (!(m >= 1)) return err('Nombre maximum invalide.'); ev.max = m; }
     if (U.edit) {
       // Mise a jour de la seule definition : r, parties, scores, extra,
       // group, invited et sideA/sideB restent intacts.
@@ -2035,13 +2080,19 @@ const A = {
     render();
   },
   copyAccess: v => { const [email, pwd, name, tt] = v.split('|'); const m = accessMsg(name, email, pwd, tt); const txt = m.subject + '\n\n' + m.body; (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(() => toast('Message copié'), () => toast('Copie impossible sur cet appareil')); },
-  editMember: k => { const m = S.team.members[k] || {}; U.mEdit = k; U.mName = m.name || ''; U.mEmail = m.email || ''; U.mHcp = m.hcp || ''; U.mPhone = phoneOf(k); U.mBorn = bornOf(k); U.mErr = ''; render(); },
+  editMember: k => { const m = S.team.members[k] || {}, g = guardOf(k); U.mEdit = k; U.mName = m.name || ''; U.mEmail = m.email || ''; U.mHcp = m.hcp || ''; U.mPhone = phoneOf(k); U.mBorn = bornOf(k);
+    U.mGName = g.name || ''; U.mGPhone = g.phone || ''; U.mGEmail = g.email || ''; U.mErr = ''; render(); },
   cancelMember: () => { U.mEdit = null; render(); },
   saveMember: async () => {
     const name = (U.mName || '').trim(), hcp = (U.mHcp || '').trim().replace(',', '.');
     if (!name) { U.mErr = 'Indique le nom.'; return render(); }
     const phone = (U.mPhone || '').trim();
     if (!okPhone(phone)) { U.mErr = 'N° de GSM invalide.'; return render(); }
+    const gPhone = (U.mGPhone || '').trim(), gEmail = (U.mGEmail || '').trim().toLowerCase();
+    if (!okPhone(gPhone)) { U.mErr = 'N° de GSM du parent invalide.'; return render(); }
+    if (gEmail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(gEmail)) { U.mErr = 'E-mail du parent invalide.'; return render(); }
+    const gName = (U.mGName || '').trim();
+    const guardian = {}; if (gName) guardian.name = gName; if (gPhone) guardian.phone = gPhone; if (gEmail) guardian.email = gEmail;
     const born = toISODate(U.mBorn);
     if (born === null || !validDate(born)) { U.mErr = 'Date de naissance invalide.'; return render(); }
     if (U.mEdit === '__new') {
@@ -2056,6 +2107,7 @@ const A = {
         const mb = { name, hcp, email }; if (born) mb.bd = born.slice(5);
         await updateDoc(doc(db, 'teams', S.teamId), { ['members.' + k]: mb, memberKeys: arrayUnion(k) });
         const ct = {}; if (phone) ct.phone = phone; if (born) ct.born = born; if (r === 'created') ct.pwd = pwd;
+        if (Object.keys(guardian).length) ct.guardian = guardian;
         if (Object.keys(ct).length) await setContact(k, ct);
         if (r === 'exists') await setContact(k, { hasAccount: true });
         U.mEdit = null; U.mErr = ''; U.created = { name, email, pwd, phone, exists: r === 'exists', key: k, tid: S.teamId };
@@ -2091,6 +2143,7 @@ const A = {
         await updateDoc(doc(db, 'teams', S.teamId), up);
         if (!demo && phone !== phoneOf(k)) await setPhone(k, phone);
         if (!demo && born !== bornOf(k)) await setContact(k, { born });
+        if (!demo) await setContact(k, { guardian: Object.keys(guardian).length ? guardian : deleteField() });
       }, 'Enregistré');
     }
   },
@@ -2297,6 +2350,13 @@ root.addEventListener('change', e => {
     const k = el.dataset.score, v = el.value.trim();
     if (has(v) && (isNaN(Number(v)) || Number(v) < 0 || Number(v) > 60)) { toast('Score Stableford entre 0 et 60.'); return; }
     safe(() => updateDoc(evRef(U.sel), { ['scores.' + k]: has(v) ? v : deleteField() }));
+    return;
+  }
+  if (el.dataset.f === 'capMax') {
+    const ev = getEv(U.sel); if (!ev) return;
+    const v = String(el.value);
+    if (v !== '' && Number(v) < yesCount(ev)) { toast(yesCount(ev) + ' joueurs sont déjà inscrits.'); render(); return; }
+    safe(() => updateDoc(evRef(U.sel), { max: v === '' ? deleteField() : Number(v) }), 'Limite mise à jour');
     return;
   }
   if (el.dataset.sk) {
