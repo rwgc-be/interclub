@@ -149,7 +149,7 @@ nav.bot button.on{background:var(--gl);color:var(--gd);font-weight:800}
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail, signOut, updateProfile } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getFirestore, collection, doc, onSnapshot, addDoc, updateDoc, deleteDoc, setDoc, query, where, deleteField, arrayUnion, arrayRemove, runTransaction, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, collection, doc, onSnapshot, getDocs, addDoc, updateDoc, deleteDoc, setDoc, query, where, deleteField, arrayUnion, arrayRemove, runTransaction, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 /* ===================== CONFIGURATION ===================== */
 // Coller ici la configuration du projet Firebase (Console Firebase > Paramètres du projet > Vos applications > Config)
@@ -163,7 +163,7 @@ const firebaseConfig = {
 };
 // Administrateurs (création des équipes et des capitaines). Même liste que dans firestore.rules.
 const ADMINS = ["francisberlier@gmail.com"];
-const VERSION = "v8.2";   // a incrementer a chaque publication
+const VERSION = "v8.3";   // a incrementer a chaque publication
 /* ========================================================= */
 
 const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -1788,6 +1788,75 @@ function vMatches(k) {
 }
 
 /* ---------- admin ---------- */
+/* ---------- sauvegarde ---------- */
+/* Export JSON complet d'une equipe ou de toutes, et restauration.
+   Reserve a l'admin : seules ses regles autorisent l'ecriture d'un
+   document a un id impose, ce dont la restauration a besoin. */
+const BK_SIG = 'interclub-backup';
+function dlJson(name, obj) {
+  const u = URL.createObjectURL(new Blob([JSON.stringify(obj, null, 1)], { type: 'application/json' }));
+  const a = document.createElement('a');
+  a.href = u; a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(u); a.remove(); }, 1500);
+}
+const bkStamp = () => { const d = new Date();
+  return d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '-' + pad(d.getHours()) + pad(d.getMinutes()); };
+const bkSlug = s => String(s || 'equipe').normalize('NFD').replace(/[̀-ͯ]/g, '')
+  .replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'equipe';
+const bkWhen = d => { const x = new Date(Number(d && d.at) || 0);
+  return !d || !d.at ? 'Date inconnue'
+    : 'Sauvegarde du ' + x.getDate() + ' ' + MOIS[x.getMonth()] + ' ' + x.getFullYear()
+      + ' à ' + pad(x.getHours()) + ':' + pad(x.getMinutes()) + (d.version ? ' · ' + d.version : ''); };
+function bkPack(team, events, contacts) {
+  const t = Object.assign({}, team); delete t.id;
+  return { id: team.id, team: t, events: (events || []).map(e => Object.assign({}, e)), contacts: contacts || {} };
+}
+const bkFile = teams => ({ app: BK_SIG, version: VERSION, at: Date.now(), by: S.user ? S.user.email : '', teams });
+async function bkLoadTeam(t) {
+  const [ev, ct] = await Promise.all([
+    getDocs(collection(db, 'teams', t.id, 'events')),
+    getDocs(collection(db, 'teams', t.id, 'contacts'))
+  ]);
+  const contacts = {}; ct.docs.forEach(d => contacts[d.id] = d.data());
+  return bkPack(t, ev.docs.map(d => Object.assign({ id: d.id }, d.data())), contacts);
+}
+function readBackupFile(f) {
+  if (!f) return;
+  if (f.size > 8000000) { U.bkErr = 'Fichier trop volumineux (max 8 Mo).'; return render(); }
+  const fr = new FileReader();
+  fr.onload = () => {
+    let d = null;
+    try { d = JSON.parse(String(fr.result || '')); } catch (e) { d = null; }
+    if (!d) { U.bkData = null; U.bkErr = 'Ce fichier n’est pas un JSON lisible.'; return render(); }
+    if (d.app !== BK_SIG || !Array.isArray(d.teams) || !d.teams.length) {
+      U.bkData = null; U.bkErr = 'Ce fichier n’est pas une sauvegarde Interclub.'; return render();
+    }
+    U.bkData = d; U.bkName = f.name; U.bkErr = ''; U.bkAsk = false; render();
+  };
+  fr.onerror = () => { U.bkErr = 'Lecture du fichier impossible.'; render(); };
+  fr.readAsText(f, 'utf-8');
+}
+function vBackup() {
+  const d = U.bkData, busy = U.bkBusy || '';
+  let h = `<div class="card" style="gap:8px"><div class="t14" style="font-weight:800">Sauvegarde</div>
+  <div class="small">Un fichier JSON daté contenant l’équipe complète : réglages, effectif, capitaines, événements avec leurs réponses et leurs scores, fiches de contact. Garde-le sur ton ordinateur.${S.team ? ' Équipe affichée : <b>' + esc(tt(S.team)) + '</b>.' : ''}</div>
+  <div class="flex"><button class="btn" data-a="bkExport" ${S.team && !busy ? '' : 'disabled'}>Exporter cette équipe</button>
+  ${S.teams.length > 1 ? `<button class="btn" data-a="bkExportAll" ${busy ? 'disabled' : ''}>${busy === 'export' ? 'Export en cours…' : 'Exporter les ' + S.teams.length + ' équipes'}</button>` : ''}</div>`;
+  if (!U.bkOpen) return h + `<button class="btn dashed" data-a="bkOpen">Restaurer depuis un fichier</button></div>`;
+  h += `<div class="panel"><div class="t14" style="font-weight:800">Restaurer</div>
+  <div class="small">Chaque document du fichier est réécrit à l’identique par-dessus celui qui existe. Ce qui a été créé <b>après</b> la sauvegarde n’est pas effacé.</div>
+  <button class="btn" data-a="pickBackup" ${busy ? 'disabled' : ''}>Choisir un fichier…</button>
+  <input type="file" accept=".json,application/json" data-file="bk" style="display:none">`;
+  if (d) h += `<div class="small" style="font-weight:700">📄 ${esc(U.bkName || '')}</div>
+  <div class="small">${esc(bkWhen(d))}${d.teams.map(p => `<br>• <b>${esc((p.team || {}).name || p.id || '?')}</b> — ${(p.events || []).length} événement${(p.events || []).length > 1 ? 's' : ''}, ${Object.keys((p.team || {}).members || {}).length} joueurs, ${Object.keys(p.contacts || {}).length} fiches`).join('')}</div>`;
+  if (U.bkErr) h += `<div class="err">${esc(U.bkErr)}</div>`;
+  h += `<div class="flex"><button class="btn" data-a="bkClose">Fermer</button>`;
+  if (d) h += U.bkAsk
+    ? `<button class="btn danger" data-a="bkRestore" ${busy ? 'disabled' : ''}>${busy === 'restore' ? 'Restauration…' : 'Confirmer la restauration'}</button>`
+    : `<button class="btn primary" data-a="bkAsk">Restaurer</button>`;
+  return h + `</div></div></div>`;
+}
+
 function vAdmin() {
   let html = `<div class="top"><h1>Admin</h1><div class="sub">Équipes et capitaines</div></div><div class="scroll" id="scroll">
   ${U.capCreated ? vCreated(U.capCreated).replace('data-a="closeCreated"', 'data-a="closeCapCreated"') : ''}
@@ -1822,6 +1891,7 @@ function vAdmin() {
     }).join('') || '<div class="li small">Aucun joueur.</div>'}</div>
     <div class="small">Pour créer ou envoyer un accès : ajoute-toi comme capitaine de l’équipe, puis Effectif → fiche du joueur.</div></div>`;
   }
+  html += vBackup();
   return html + `<button class="link center" data-a="logout">Se déconnecter (${esc(S.user.email)})</button><div class="small center">${VERSION}</div></div>`;
 }
 
@@ -2287,7 +2357,57 @@ const A = {
   /* import d'une liste */
   openImport: () => { U.impOpen = true; U.impTxt = U.impTxt || ''; U.impAcc = U.impAcc !== false; U.impLog = null; U.impErr = ''; render(); },
   closeImport: () => { U.impOpen = false; U.impErr = ''; U.impFile = ''; U.impSheet = ''; render(); },
-  pickFile: () => { const i = document.querySelector('[data-file]'); if (i) i.click(); },
+  pickFile: () => { const i = document.querySelector('[data-file="1"]'); if (i) i.click(); },
+  /* sauvegarde */
+  pickBackup: () => { const i = document.querySelector('[data-file="bk"]'); if (i) i.click(); },
+  bkOpen: () => { U.bkOpen = true; U.bkErr = ''; render(); },
+  bkClose: () => { U.bkOpen = false; U.bkData = null; U.bkName = ''; U.bkErr = ''; U.bkAsk = false; render(); },
+  bkAsk: () => { U.bkAsk = true; render(); },
+  bkExport: () => {
+    if (!S.team) return toast('Aucune équipe sélectionnée.');
+    dlJson('interclub-' + bkSlug(S.team.name) + '-' + bkStamp() + '.json',
+      bkFile([bkPack(S.team, S.events, S.contacts)]));
+    toast('Sauvegarde téléchargée');
+  },
+  bkExportAll: async () => {
+    U.bkBusy = 'export'; render();
+    try {
+      const packs = [];
+      for (const t of S.teams) packs.push(await bkLoadTeam(t));
+      dlJson('interclub-toutes-equipes-' + bkStamp() + '.json', bkFile(packs));
+      toast(packs.length + ' équipe' + (packs.length > 1 ? 's sauvegardées' : ' sauvegardée'));
+    } catch (e) { console.error(e); toast('Export impossible : ' + (e.message || e)); }
+    U.bkBusy = ''; render();
+  },
+  bkRestore: async () => {
+    const d = U.bkData; if (!d) return;
+    U.bkBusy = 'restore'; U.bkAsk = false; U.bkErr = ''; render();
+    let nEv = 0, nCt = 0, nTeam = 0;
+    try {
+      for (const p of d.teams) {
+        const tid = p && p.id; if (!tid || !p.team) continue;
+        await setDoc(doc(db, 'teams', tid), p.team, { merge: true }); nTeam++;
+        let b = writeBatch(db), n = 0;
+        for (const e of (p.events || [])) {
+          const ev = Object.assign({}, e), id = ev.id; delete ev.id;
+          if (!id) continue;
+          b.set(doc(db, 'teams', tid, 'events', id), ev); nEv++;
+          if (++n >= 400) { await b.commit(); b = writeBatch(db); n = 0; }
+        }
+        for (const k of Object.keys(p.contacts || {})) {
+          b.set(doc(db, 'teams', tid, 'contacts', k), p.contacts[k]); nCt++;
+          if (++n >= 400) { await b.commit(); b = writeBatch(db); n = 0; }
+        }
+        if (n) await b.commit();
+      }
+      U.bkData = null; U.bkName = ''; U.bkOpen = false;
+      toast(nTeam + ' équipe' + (nTeam > 1 ? 's' : '') + ' · ' + nEv + ' événements · ' + nCt + ' fiches restaurés');
+    } catch (e) {
+      console.error(e);
+      U.bkErr = 'Restauration interrompue après ' + nEv + ' événements : ' + (e.message || e);
+    }
+    U.bkBusy = ''; render();
+  },
   impAcc: v => { U.impAcc = !!Number(v); render(); },
   runImport: async () => {
     const el = document.querySelector('[data-f="impTxt"]');
@@ -2460,7 +2580,11 @@ root.addEventListener('change', e => {
     safe(() => updateDoc(evRef(U.sel), { ['scores.' + k + '.' + f]: raw === '' ? deleteField() : raw }));
     return;
   }
-  if (el.dataset.file !== undefined) { readImportFile(el.files && el.files[0]); el.value = ''; return; }
+  if (el.dataset.file !== undefined) {
+    const f = el.files && el.files[0];
+    if (el.dataset.file === 'bk') readBackupFile(f); else readImportFile(f);
+    el.value = ''; return;
+  }
   if (el.dataset.pb) {
     const [k, f] = el.dataset.pb.split('|'); const raw = String(el.value).trim();
     const ev = getEv(U.sel); if (!ev) return;
