@@ -163,7 +163,7 @@ const firebaseConfig = {
 };
 // Administrateurs (création des équipes et des capitaines). Même liste que dans firestore.rules.
 const ADMINS = ["francisberlier@gmail.com"];
-const VERSION = "v8.0";   // a incrementer a chaque publication
+const VERSION = "v8.2";   // a incrementer a chaque publication
 /* ========================================================= */
 
 const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -859,6 +859,15 @@ function vHeader(title, plusAction, plusLabel) {
       [['1', 'Le jour même'], ['2', 'La veille et le jour même'], ['3', '3 jours avant'], ['7', 'Une semaine avant'], ['0', 'Jamais']].map(([v, l]) => `<option value="${v}" ${String(U.tiBdDays) === v ? 'selected' : ''}>${l}</option>`).join('')
     }</select></label>
     <div class="small">${U.tiBdDays === '0' ? 'Aucun bandeau d’anniversaire.' : U.tiBdDays === '1' ? 'Visible uniquement le jour de l’anniversaire.' : 'Annoncé à l’avance — « Anniversaire de Paul dans 3 jours » — puis les vœux le jour même.'}</div>
+    ${(() => {
+      const n = (S.events || []).filter(e => e.msg && e.msg.t).length;
+      if (!n) return '';
+      return `<div style="border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:6px">
+        <div class="t14" style="font-weight:800">Mots publiés dans l’appli</div>
+        <div class="small">${n} événement${n > 1 ? 's' : ''} porte${n > 1 ? 'nt' : ''} un mot. Les effacer ne touche pas aux messages déjà partis sur WhatsApp.</div>
+        ${U.msgAllDel ? `<div class="flex"><button class="btn" data-a="msgAllDel" data-v="0">Garder</button><button class="btn danger" data-a="msgClearAll">Effacer les ${n}</button></div>`
+          : `<button class="btn" data-a="msgAllDel" data-v="1">Effacer tous les mots</button>`}</div>`;
+    })()}
     <div class="flex"><button class="btn" data-a="cancelTitle">Annuler</button><button class="btn primary" data-a="saveTitle">Enregistrer</button></div></div></div>`;
   const titleEl = S.teams.length > 1
     ? `<select class="tsel" data-f="teamPick" data-r="1" aria-label="Changer d’équipe">${S.teams.map(x => `<option value="${esc(x.id)}" ${x.id === S.teamId ? 'selected' : ''}>${esc(tt(x))}</option>`).join('')}</select>`
@@ -1204,7 +1213,9 @@ function vDetail(ev) {
   </div>
   ${ev.msg && ev.msg.t ? `<div class="msgbox"><div class="t14" style="font-weight:800">Mot de ${esc(nameOf(ev.msg.by))}</div>
     <div style="white-space:pre-line">${esc(ev.msg.t)}</div>
-    <div class="small">${esc(msgWhen(ev.msg.at))}</div></div>` : ''}
+    <div class="small">${esc(msgWhen(ev.msg.at))}</div>
+    ${cap ? (U.msgDel ? `<div class="flex"><button class="btn" data-a="msgDel" data-v="0">Garder</button><button class="btn danger" data-a="msgClear">Effacer définitivement</button></div>`
+      : `<button class="edit" style="align-self:flex-start;color:var(--red)" data-a="msgDel" data-v="1">Effacer ce mot</button>`) : ''}</div>` : ''}
   ${ev.cancel ? `<div class="cxbox"><div class="t14" style="font-weight:800">Événement annulé</div>
     ${ev.cancelMsg ? `<div class="small">${esc(ev.cancelMsg)}</div>` : ''}
     <div class="small">Les réponses ci-dessous sont conservées, mais plus personne ne peut s’inscrire. Cet événement ne compte pas dans les présences.</div>
@@ -1917,7 +1928,7 @@ const A = {
   togglePast: () => { U.showPast = !U.showPast; U.todayScroll = true; render(); },
   toggleMine: () => { U.showMine = !U.showMine; U.todayScroll = true; render(); },
   clearTgl: () => { U.showMine = false; U.showPast = false; U.todayScroll = true; render(); },
-  open: v => { U.view = 'detail'; U.sel = v; U.confirmDel = false; U.cancelAsk = false; U.shareNote = ''; U.shareInApp = false; U.justCreated = false; U.askCycle = null;
+  open: v => { U.view = 'detail'; U.sel = v; U.confirmDel = false; U.cancelAsk = false; U.shareNote = ''; U.shareInApp = false; U.justCreated = false; U.askCycle = null; U.msgDel = false;
     msgMarkRead(getEv(v)); render(); },
   backList: () => { U.view = 'list'; U.sel = null; U.selPlayer = null; U.justCreated = false; render(); },
   backDetail: () => { U.view = 'detail'; U.pEdit = null; U.addParty = false; U.xEdit = null; render(); },
@@ -1957,6 +1968,19 @@ const A = {
   addSlot: () => { U.f.slots = (U.f.slots || []).concat([{ date: U.f.date || '', time: '' }]); render(); },
   delSlot: i => { U.f.slots.splice(Number(i), 1); render(); },
   askCycle: v => { U.askCycle = v || null; render(); },
+  msgDel: v => { U.msgDel = v === '1'; render(); },
+  msgAllDel: v => { U.msgAllDel = v === '1'; render(); },
+  msgClearAll: () => {
+    U.msgAllDel = false;
+    const hit = (S.events || []).filter(e => e.msg && e.msg.t);
+    if (!hit.length) return render();
+    safe(async () => {
+      const b = writeBatch(db);
+      hit.forEach(e => b.update(evRef(e.id), { msg: deleteField() }));
+      await b.commit();
+    }, hit.length + ' mot' + (hit.length > 1 ? 's' : '') + ' effacé' + (hit.length > 1 ? 's' : ''));
+  },
+  msgClear: () => { U.msgDel = false; safe(() => updateDoc(evRef(U.sel), { msg: deleteField() }), 'Mot effacé'); },
   cycle: k => { U.askCycle = null; const ev0 = getEv(U.sel); if (ev0.max && ((ev0.r || {})[k] || 'none') === 'none' && isFull(ev0)) toast('Attention : maximum dépassé (' + ev0.max + ')'); const ev = ev0; const v = (ev.r || {})[k] || 'none'; const n = v === 'none' ? 'yes' : v === 'yes' ? 'no' : 'none'; safe(() => updateDoc(evRef(U.sel), { ['r.' + k]: n === 'none' ? deleteField() : n })); },
   toggleImp: () => {
     const ev = getEv(U.sel); if (!ev) return;
@@ -2223,7 +2247,7 @@ const A = {
   },
   saveMyPhone: () => { const ph = (U.myPhone ?? phoneOf(me())).trim(); if (!okPhone(ph)) return toast('N° de GSM invalide.'); U.myPhone = undefined; safe(() => setPhone(me(), ph), 'GSM enregistré'); },
   editTitle: () => {
-    const t = S.team; U.titleEdit = true;
+    const t = S.team; U.titleEdit = true; U.msgAllDel = false;
     U.tiTitle = t.title || ('Interclub ' + (t.name || '')); U.tiName = t.name || ''; U.tiSeason = t.season || '';
     U.tiTheme = t.theme || 'none'; U.tiMsg = (t.themeMsgs || {})[U.tiTheme] || '';
     U.tiDates = JSON.parse(JSON.stringify(t.themeDates || {}));
