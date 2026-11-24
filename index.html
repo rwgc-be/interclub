@@ -163,7 +163,7 @@ const firebaseConfig = {
 };
 // Administrateurs (création des équipes et des capitaines). Même liste que dans firestore.rules.
 const ADMINS = ["francisberlier@gmail.com"];
-const VERSION = "v7.6";   // a incrementer a chaque publication
+const VERSION = "v7.8";   // a incrementer a chaque publication
 /* ========================================================= */
 
 const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -1037,8 +1037,14 @@ function shareHead(ev, mode) {
 /* Message pret a coller dans WhatsApp. mode : 'remind' pour un rappel.
    note : mot libre du capitaine, place juste sous le titre. */
 function shareText(ev, mode, note) {
+  const n0 = String(note == null ? (U.shareNote || '') : note).trim();
+  /* Message court : la reference de l'evenement, le mot, le lien. Rien d'autre. */
+  if (mode === 'note') {
+    const ref = typeOf(ev.type).l + ' · ' + longDate(ev.date) + (ev.time ? ' · ' + timeText(ev) : '');
+    return [ref, n0, '', location.origin + location.pathname].filter((x, i) => i !== 1 || x).join('\n');
+  }
   const l = [shareHead(ev, mode)];
-  const n = String(note == null ? (U.shareNote || '') : note).trim();
+  const n = n0;
   if (n) l.push(n);
   l.push(longDate(ev.date) + (ev.time ? ' · ' + timeText(ev) : '') + (ev.place ? ' · ' + ev.place : ''));
   if (ev.cancel) { if (ev.cancelMsg) l.push('Motif : ' + ev.cancelMsg); }
@@ -1065,6 +1071,15 @@ function missing(ev) {
   const pool = ev.free ? (ev.invited || []) : ((S.team && S.team.memberKeys) || []);
   const r = ev.r || {};
   return pool.filter(k => !r[k]);
+}
+/* Parents joignables parmi les convoques : tout message adresse a leur
+   enfant doit pouvoir partir vers eux aussi. */
+function guardianTargets(ev) {
+  const pool = ev.free ? (ev.invited || []) : ((S.team && S.team.memberKeys) || []);
+  return pool.map(k => ({ k, g: guardOf(k) }))
+    .filter(x => x.g && x.g.phone)
+    .map(x => ({ k: x.k, name: x.g.name || 'Parent', phone: x.g.phone, player: nameOf(x.k), r: (ev.r || {})[x.k] || 'none' }))
+    .sort((a, b) => a.player.localeCompare(b.player, 'fr'));
 }
 /* Propositions ouvertes, a venir, auxquelles je n'ai pas encore repondu. */
 function openCalls() {
@@ -1190,9 +1205,20 @@ function vDetail(ev) {
     <div class="small">${ev.open ? 'Il apparaît dans l’agenda de tout l’effectif. Préviens le groupe pour que quelqu’un le voie aujourd’hui.' : 'Préviens l’équipe pour que personne ne le manque.'}</div></div>` : ''}
   ${!ev.cancel ? `<div style="display:flex;flex-direction:column;gap:8px">
     <label class="f">Mot à ajouter au message (facultatif)<input class="in" data-f="shareNote" value="${esc(U.shareNote || '')}" placeholder="ex. n’oubliez pas vos cartes"></label>
-    <div class="row2"><button class="btn ${U.justCreated ? 'primary' : ''}" data-a="share">${ICON.share} Partager</button>
-    <button class="btn" data-a="share" data-v="remind">${ICON.share} Rappel</button></div>
-    <div class="small">Ton mot se place juste sous le titre. Le bouton prépare le message et te laisse choisir où l’envoyer — groupe WhatsApp, SMS ou e-mail.</div></div>` : ''}
+    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px">
+    <button class="btn ${U.justCreated ? 'primary' : ''}" data-a="share" style="font-size:13px">${ICON.share} Partager</button>
+    <button class="btn" data-a="share" data-v="remind" style="font-size:13px">${ICON.share} Rappel</button>
+    <button class="btn" data-a="share" data-v="note" style="font-size:13px">${ICON.share} Mot seul</button></div>
+    <div class="small"><b>Partager</b> annonce l’événement, <b>Rappel</b> relance, <b>Mot seul</b> n’envoie que ton mot avec la date et le type. Le bouton prépare le message et te laisse choisir où l’envoyer — groupe WhatsApp, SMS ou e-mail.</div>
+    ${(() => {
+      const gs = guardianTargets(ev); if (!gs.length) return '';
+      const txt = shareText(ev, null, U.shareNote || '');
+      return `<div style="border-top:1px solid var(--line);padding-top:8px;display:flex;flex-direction:column;gap:6px">
+        <div class="small" style="font-weight:700">Prévenir aussi les parents (${gs.length})</div>
+        <div class="small">Le groupe WhatsApp ne les atteint pas. Un envoi par parent, avec le même message.</div>
+        ${gs.map(x => `<a class="btn" style="display:flex;align-items:center;justify-content:center;text-decoration:none;font-size:14px" href="${esc(waHref(x.phone) + '?text=' + encodeURIComponent(txt))}" target="_blank" rel="noopener">${esc(x.name)} — parent de ${esc(x.player)}${x.r === 'yes' ? ' · présent' : x.r === 'no' ? ' · absent' : ' · sans réponse'}</a>`).join('')}
+      </div>`;
+    })()}</div>` : ''}
   ${cap && !ev.free && !ev.cancel ? `<button class="btn ${ev.imp ? 'sel' : ''}" data-a="toggleImp">${ev.imp ? 'Retirer le marquage' : 'Marquer comme important'}</button>` : ''}
   ${canCancel ? (ev.cancel ? `<button class="btn" data-a="uncancel">Rétablir l’événement</button>`
     : U.cancelAsk ? `<div class="cxbox"><div class="t14" style="font-weight:800">Annuler cet événement ?</div>
@@ -1922,6 +1948,7 @@ const A = {
      navigator.share - surtout sur PC - on se rabat sur le presse-papier. */
   share: async v => {
     const ev = getEv(U.sel); if (!ev) return;
+    if (v === 'note' && !String(U.shareNote || '').trim()) return toast('Écris d’abord ton mot ci-dessus.');
     const txt = shareText(ev, v);
     try {
       if (navigator.share) { await navigator.share({ text: txt }); return; }
