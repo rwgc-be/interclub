@@ -163,7 +163,7 @@ const firebaseConfig = {
 };
 // Administrateurs (création des équipes et des capitaines). Même liste que dans firestore.rules.
 const ADMINS = ["francisberlier@gmail.com"];
-const VERSION = "v8.3";   // a incrementer a chaque publication
+const VERSION = "v8.4";   // a incrementer a chaque publication
 /* ========================================================= */
 
 const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -609,7 +609,7 @@ function render() {
   const sc = document.getElementById('scroll');
   const key = [U.tab, U.view, U.sel, U.selPlayer, U.statTab, U.agFilter, S.teamId].join('|');
   const keep = sc && key === lastViewKey ? sc.scrollTop : null;
-  root.innerHTML = view();
+  root.innerHTML = viewSafe();
   applyDecor();
   updateFx();
   document.title = S.team ? (S.team.title || ('Interclub ' + (S.team.name || ''))) : 'Interclub';
@@ -623,6 +623,27 @@ function render() {
   if (U.todayScroll && U.tab === 'agenda' && U.view === 'list') {
     const mark = document.getElementById('today-mark');
     if (sc2 && mark) { sc2.scrollTop = mark.offsetTop - sc2.offsetTop - 4; U.todayScroll = false; }
+  }
+}
+
+/* Filet de securite : si un ecran leve une exception, on ne laisse jamais
+   l'appli figee. On retombe sur l'agenda ; si l'agenda lui-meme echoue, on
+   affiche l'erreur avec un bouton pour recharger. */
+function vCrash(err) {
+  return `<div class="auth"><div class="logo">Interclub</div><div class="card">
+  <div class="t15" style="font-weight:800">Cet écran n’a pas pu s’afficher</div>
+  <div class="small">Recharge la page. Si le problème revient, transmets ce message : <b>${esc(String((err && err.message) || err))}</b></div>
+  <button class="btn primary" data-a="reload">Recharger</button></div></div>`;
+}
+function viewSafe() {
+  try { return view(); } catch (err) {
+    console.error(err);
+    if (U.tab === 'agenda' && U.view === 'list') return vCrash(err);
+    U.tab = 'agenda'; U.view = 'list'; U.sel = null; U.selPlayer = null;
+    /* pas de toast() ici : il rappellerait render() en pleine exécution */
+    U.toast = 'Écran indisponible — retour à l’agenda';
+    clearTimeout(S.tt); S.tt = setTimeout(() => { U.toast = ''; render(); }, 2600);
+    try { return view(); } catch (e2) { console.error(e2); return vCrash(e2); }
   }
 }
 
@@ -1838,8 +1859,9 @@ function readBackupFile(f) {
 }
 function vBackup() {
   const d = U.bkData, busy = U.bkBusy || '';
+  const tName = x => (x && x.title) || ('Interclub ' + ((x && x.name) || ''));
   let h = `<div class="card" style="gap:8px"><div class="t14" style="font-weight:800">Sauvegarde</div>
-  <div class="small">Un fichier JSON daté contenant l’équipe complète : réglages, effectif, capitaines, événements avec leurs réponses et leurs scores, fiches de contact. Garde-le sur ton ordinateur.${S.team ? ' Équipe affichée : <b>' + esc(tt(S.team)) + '</b>.' : ''}</div>
+  <div class="small">Un fichier JSON daté contenant l’équipe complète : réglages, effectif, capitaines, événements avec leurs réponses et leurs scores, fiches de contact. Garde-le sur ton ordinateur.${S.team ? ' Équipe affichée : <b>' + esc(tName(S.team)) + '</b>.' : ''}</div>
   <div class="flex"><button class="btn" data-a="bkExport" ${S.team && !busy ? '' : 'disabled'}>Exporter cette équipe</button>
   ${S.teams.length > 1 ? `<button class="btn" data-a="bkExportAll" ${busy ? 'disabled' : ''}>${busy === 'export' ? 'Export en cours…' : 'Exporter les ' + S.teams.length + ' équipes'}</button>` : ''}</div>`;
   if (!U.bkOpen) return h + `<button class="btn dashed" data-a="bkOpen">Restaurer depuis un fichier</button></div>`;
@@ -2357,6 +2379,7 @@ const A = {
   /* import d'une liste */
   openImport: () => { U.impOpen = true; U.impTxt = U.impTxt || ''; U.impAcc = U.impAcc !== false; U.impLog = null; U.impErr = ''; render(); },
   closeImport: () => { U.impOpen = false; U.impErr = ''; U.impFile = ''; U.impSheet = ''; render(); },
+  reload: () => location.reload(),
   pickFile: () => { const i = document.querySelector('[data-file="1"]'); if (i) i.click(); },
   /* sauvegarde */
   pickBackup: () => { const i = document.querySelector('[data-file="bk"]'); if (i) i.click(); },
