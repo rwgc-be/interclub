@@ -168,7 +168,7 @@ const firebaseConfig = {
 };
 // Administrateurs (création des équipes et des capitaines). Même liste que dans firestore.rules.
 const ADMINS = ["francisberlier@gmail.com"];
-const VERSION = "v8.6";   // a incrementer a chaque publication
+const VERSION = "v8.7";   // a incrementer a chaque publication
 /* ========================================================= */
 
 const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -1207,8 +1207,10 @@ function flTile(ev) {
   const sub = !F.length ? (capView() ? 'À composer' : 'Pas encore composés')
     : mine >= 0 ? 'Ton départ · ' + (F[mine].t || 'heure à fixer')
     : F.length + ' départ' + (F.length > 1 ? 's' : '');
-  return `<button class="ev" data-a="openFlights" style="padding:12px 14px;border-radius:18px;flex-direction:column;align-items:flex-start;justify-content:center;gap:2px">
-    <span class="t15" style="font-weight:800">Départs</span><span class="small">${esc(sub)}</span></button>`;
+  return `<button class="ev" data-a="openFlights" style="padding:12px 14px;border-radius:18px;border:2px solid var(--g);flex-direction:column;align-items:flex-start;justify-content:center;gap:3px;text-align:left">
+    <span class="t14" style="font-weight:800;line-height:1.25">Ordre des départs et détail des match play</span>
+    <span class="small" style="font-weight:700">${esc(sub)}</span>
+    <span class="small">Cliquer pour voir les départs</span></button>`;
 }
 function vFlights(ev) {
   const cap = capView(), mk = me(), F = flOf(ev);
