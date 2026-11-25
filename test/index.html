@@ -168,7 +168,7 @@ const firebaseConfig = {
 };
 // Administrateurs (création des équipes et des capitaines). Même liste que dans firestore.rules.
 const ADMINS = ["francisberlier@gmail.com"];
-const VERSION = "v8.5";   // a incrementer a chaque publication
+const VERSION = "v8.6";   // a incrementer a chaque publication
 /* ========================================================= */
 
 const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -671,6 +671,7 @@ function view() {
   else if (!S.team) body = `<div class="top"><h1>Interclub</h1><div class="small">${S.teams.length ? 'Chargement de l’équipe…' : 'Aucune équipe. Crée-en une dans l’onglet Admin.'}</div></div>`;
   else if (U.view === 'detail' && getEv(U.sel)) body = vDetail(getEv(U.sel));
   else if (U.view === 'results' && getEv(U.sel)) body = vResults(getEv(U.sel));
+  else if (U.view === 'flights' && getEv(U.sel)) body = vFlights(getEv(U.sel));
   else if (U.view === 'add') body = vAdd();
   else if (U.view === 'player' && U.selPlayer) body = vFiche(U.selPlayer, true);
   else if (U.view === 'matches' && U.selPlayer) body = vMatches(U.selPlayer);
@@ -1169,6 +1170,110 @@ function vCalls() {
 const joinFr = a => a.length < 2 ? (a[0] || '') : a.slice(0, -1).join(', ') + ' et ' + a[a.length - 1];
 
 /* ---------- detail ---------- */
+/* ---------- departs (flys) ---------- */
+/* Un depart = une heure et 2 a 4 joueurs. L'ORDRE des joueurs porte les
+   appariements, ce qui evite de stocker les matchs separement :
+     2 joueurs            -> 1 simple          p0 contre p1
+     3 joueurs            -> 3 matchs croises  p0-p1, p0-p2, p1-p2
+     4 joueurs, f absent  -> 2 simples         p0-p1 et p2-p3
+     4 joueurs, f = 1     -> 1 foursome        p0+p1 contre p2+p3
+   Le capitaine reordonne les joueurs pour changer qui affronte qui. */
+const FL_GAP = 10;
+const flHas = t => t === 'matchplay' || t === 'redtide';
+const flOf = ev => Array.isArray(ev.flights) ? ev.flights : [];
+const flPlaced = ev => flOf(ev).reduce((a, f) => a.concat(f.p || []), []);
+const flMine = ev => flOf(ev).findIndex(f => (f.p || []).includes(me()));
+const flGap = ev => Number(ev.gap) > 0 ? Number(ev.gap) : FL_GAP;
+const hmToMin = s => /^\d{1,2}:\d{2}$/.test(s || '') ? Number(s.split(':')[0]) * 60 + Number(s.split(':')[1]) : null;
+const minToHm = n => pad(Math.floor((n % 1440 + 1440) % 1440 / 60)) + ':' + pad(((n % 60) + 60) % 60);
+function flMatches(f) {
+  const p = (f && f.p) || [];
+  if (p.length === 2) return [{ a: [p[0]], b: [p[1]] }];
+  if (p.length === 3) return [{ a: [p[0]], b: [p[1]] }, { a: [p[0]], b: [p[2]] }, { a: [p[1]], b: [p[2]] }];
+  if (p.length === 4) return f.f ? [{ a: [p[0], p[1]], b: [p[2], p[3]] }]
+    : [{ a: [p[0]], b: [p[1]] }, { a: [p[2]], b: [p[3]] }];
+  return [];
+}
+const flVs = m => m.a.map(nameOf).join(' & ') + ' contre ' + m.b.map(nameOf).join(' & ');
+const flFormat = f => { const n = ((f && f.p) || []).length;
+  return n === 4 && f.f ? 'Foursome' : n === 3 ? '3 matchs croisés' : n === 4 ? '2 simples' : n === 2 ? 'Simple' : 'Incomplet'; };
+/* Heures recalculees depuis l'heure de l'evenement, par pas de gap. */
+function flRetime(ev, list) {
+  const base = hmToMin(ev.time), g = flGap(ev);
+  return list.map((f, i) => Object.assign({}, f, { t: base === null ? (f.t || '') : minToHm(base + i * g) }));
+}
+function flTile(ev) {
+  const F = flOf(ev), mine = flMine(ev);
+  const sub = !F.length ? (capView() ? 'À composer' : 'Pas encore composés')
+    : mine >= 0 ? 'Ton départ · ' + (F[mine].t || 'heure à fixer')
+    : F.length + ' départ' + (F.length > 1 ? 's' : '');
+  return `<button class="ev" data-a="openFlights" style="padding:12px 14px;border-radius:18px;flex-direction:column;align-items:flex-start;justify-content:center;gap:2px">
+    <span class="t15" style="font-weight:800">Départs</span><span class="small">${esc(sub)}</span></button>`;
+}
+function vFlights(ev) {
+  const cap = capView(), mk = me(), F = flOf(ev);
+  const pool = ev.free ? (ev.invited || []) : (S.team.memberKeys || []);
+  const present = pool.filter(k => (ev.r || {})[k] === 'yes');
+  const placed = flPlaced(ev);
+  const avail = present.filter(k => !placed.includes(k));
+  const sel = U.flNew || [];
+  let h = `<div class="top"><div><button class="back" data-a="backDetail">${ICON.back}${esc(ev.title)}</button></div></div>
+  <div class="scroll" id="scroll" style="gap:14px">
+  <div style="display:flex;flex-direction:column;gap:4px">
+    <h2>Départs</h2>
+    <div class="sub" style="font-weight:500">${longDate(ev.date)}${ev.time ? ' · premier départ ' + esc(timeText(ev)) : ''}</div>
+    <div class="small">${present.length} présent${present.length > 1 ? 's' : ''} · ${placed.length} placé${placed.length > 1 ? 's' : ''} · ${avail.length} à placer</div>
+  </div>`;
+  if (!F.length) h += `<div class="card"><div class="small">Aucun départ composé pour l’instant.${cap ? ' Compose-les ci-dessous : choisis les joueurs d’un fly, l’appli en déduit les matchs.' : ' Ton capitaine les publiera ici.'}</div></div>`;
+  h += F.map((f, i) => {
+    const ms = flMatches(f), mien = (f.p || []).includes(mk);
+    return `<div class="card" style="gap:8px;${mien ? 'border:2px solid var(--g)' : ''}">
+    <div class="toprow"><div class="t14" style="font-weight:800">Départ ${i + 1}${mien ? ' · toi' : ''}</div>
+      ${cap ? `<input class="in" type="time" data-ft="${i}" value="${esc(f.t || '')}" style="width:116px;padding:6px 8px;font-size:14px">`
+            : `<span class="pill yes">${esc(f.t || 'heure à fixer')}</span>`}</div>
+    <div class="small" style="font-weight:700">${esc(flFormat(f))}</div>
+    <div class="list">${(f.p || []).map((k, j) => `<div class="li"><div class="av">${esc(initials(nameOf(k)))}</div>
+      <div class="grow t14" style="font-weight:600">${esc(nameOf(k))}${k === mk ? ' (toi)' : ''}</div>
+      ${cap ? `<button class="pill click" data-a="flUp" data-v="${i}:${j}" ${j === 0 ? 'disabled style="opacity:.35"' : ''} aria-label="Monter">↑</button>
+        <button class="pill click" data-a="flDown" data-v="${i}:${j}" ${j === (f.p || []).length - 1 ? 'disabled style="opacity:.35"' : ''} style="margin-left:4px" aria-label="Descendre">↓</button>` : ''}</div>`).join('')}</div>
+    ${ms.length ? `<div style="display:flex;flex-direction:column;gap:2px">${ms.map(m => `<div class="t14" style="font-weight:600">${esc(flVs(m))}</div>`).join('')}</div>`
+      : '<div class="small" style="color:var(--red)">Il faut 2, 3 ou 4 joueurs.</div>'}
+    ${cap ? `<div class="flex">${(f.p || []).length === 4 ? `<button class="btn" data-a="flFour" data-v="${i}">${f.f ? 'Passer en 2 simples' : 'Passer en foursome'}</button>` : ''}
+      <button class="btn danger" data-a="flDel" data-v="${i}">Supprimer</button></div>` : ''}</div>`;
+  }).join('');
+  if (!cap) return h + '</div>';
+  /* --- composition --- */
+  h += `<div class="panel"><div class="t14" style="font-weight:800">Ajouter un départ</div>`;
+  if (!avail.length && !sel.length) h += `<div class="small">Tous les joueurs présents sont placés.</div>`;
+  else {
+    h += `<div class="small">Touche les joueurs dans l’ordre : le 1<sup>er</sup> affronte le 2<sup>e</sup>, le 3<sup>e</sup> affronte le 4<sup>e</sup>. 2 à 4 joueurs.</div>
+    <div class="list">${avail.concat(sel.filter(k => !avail.includes(k))).sort((a, b) => nameOf(a).localeCompare(nameOf(b), 'fr')).map(k => {
+      const n = sel.indexOf(k);
+      return `<button class="li click" data-a="flPick" data-v="${esc(k)}" style="${n >= 0 ? 'background:var(--gl)' : ''}">
+        <div class="av">${esc(initials(nameOf(k)))}</div><div class="grow t14" style="font-weight:600;text-align:left">${esc(nameOf(k))}</div>
+        <span class="pill ${n >= 0 ? 'yes' : ''}">${n >= 0 ? n + 1 : '+'}</span></button>`;
+    }).join('')}</div>`;
+    if (sel.length >= 2) {
+      const prev = { p: sel, f: sel.length === 4 && U.flFour };
+      h += `<div class="small" style="font-weight:700">${esc(flFormat(prev))}</div>
+      ${flMatches(prev).map(m => `<div class="t14" style="font-weight:600">${esc(flVs(m))}</div>`).join('')}
+      ${sel.length === 4 ? `<label class="f" style="flex-direction:row;align-items:center;gap:8px;font-weight:600">
+        <input type="checkbox" data-f="flFour" ${U.flFour ? 'checked' : ''} style="width:18px;height:18px;flex:0 0 auto">Foursome : 1 &amp; 2 contre 3 &amp; 4</label>` : ''}`;
+    }
+    if (U.flErr) h += `<div class="err">${esc(U.flErr)}</div>`;
+    h += `<div class="flex">${sel.length ? `<button class="btn" data-a="flClear">Vider</button>` : ''}
+      <button class="btn primary" data-a="flSave" ${sel.length < 2 ? 'disabled style="opacity:.5"' : ''}>Créer le départ</button></div>`;
+  }
+  h += `</div>`;
+  h += `<div class="card" style="gap:8px"><div class="t14" style="font-weight:800">Heures de départ</div>
+  <div class="small">Tu peux corriger chaque heure à la main ci-dessus. Le bouton ci-dessous les recalcule toutes depuis l’heure de l’événement${ev.time ? ' (' + esc(timeText(ev)) + ')' : ''}, par pas régulier.</div>
+  <label class="f">Intervalle entre deux départs
+    <select class="in" data-f="flGap" data-r="1">${[8, 10, 12, 15].map(g => `<option value="${g}" ${flGap(ev) === g ? 'selected' : ''}>${g} minutes</option>`).join('')}</select></label>
+  <button class="btn" data-a="flRetime" ${!F.length || !ev.time ? 'disabled style="opacity:.5"' : ''}>Recalculer les heures</button>
+  ${!ev.time ? '<div class="small">L’événement n’a pas d’heure : renseigne-la dans Modifier pour utiliser le calcul automatique.</div>' : ''}</div>`;
+  return h + '</div>';
+}
+
 function vParticipation(ev, my) {
   const mk = me(), full = isFull(ev);
   /* Evenement passe : fige pour les joueurs, le capitaine corrige encore. */
@@ -1184,8 +1289,15 @@ function vParticipation(ev, my) {
   else if (full) { info = '<div class="small">Le nombre maximum de joueurs est atteint.</div>'; yesBtn = `<button class="btn" disabled style="opacity:.5">Complet</button>`; }
   else yesBtn = `<button class="btn" data-a="setMine" data-v="yes">Présent</button>`;
   const left = ev.max ? ev.max - yesCount(ev) : null;
+  const noBtn = `<button class="btn ${my === 'no' ? 'selno' : ''}" data-a="setMine" data-v="no">Absent</button>`;
+  /* Match play : les boutons passent sur une demi-largeur, l'autre moitie
+     ouvre l'ecran des departs. */
+  const body = flHas(ev.type)
+    ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:stretch">
+        <div style="display:flex;flex-direction:column;gap:8px">${yesBtn}${noBtn}</div>${flTile(ev)}</div>`
+    : `<div class="flex">${yesBtn}${noBtn}</div>`;
   return `<div class="card"><div class="toprow"><div class="t14">Ta participation</div>${ev.max ? `<span class="pill ${full ? 'no' : 'yes'}">${full ? 'Complet' : left + ' place' + (left > 1 ? 's' : '') + ' libre' + (left > 1 ? 's' : '')} · ${yesCount(ev)} / ${ev.max}</span>` : ''}</div>
-  ${info}<div class="flex">${yesBtn}<button class="btn ${my === 'no' ? 'selno' : ''}" data-a="setMine" data-v="no">Absent</button></div></div>`;
+  ${info}${body}</div>`;
 }
 function vSlots(ev) {
   const g = groupOf(ev); if (g.length < 2) return '';
@@ -2203,6 +2315,44 @@ const A = {
     U.pEdit = null; render();
     safe(() => updateDoc(evRef(ev.id), { parties: P }), 'Résultat enregistré');
   },
+  /* departs (flys) */
+  openFlights: () => { U.view = 'flights'; U.flNew = []; U.flFour = false; U.flErr = ''; render(); },
+  flPick: k => {
+    const s = (U.flNew || []).slice(), i = s.indexOf(k);
+    if (i >= 0) s.splice(i, 1);
+    else { if (s.length >= 4) { U.flErr = 'Un départ compte 4 joueurs au maximum.'; return render(); } s.push(k); }
+    if (s.length !== 4) U.flFour = false;
+    U.flNew = s; U.flErr = ''; render();
+  },
+  flClear: () => { U.flNew = []; U.flFour = false; U.flErr = ''; render(); },
+  flSave: () => {
+    const ev = getEv(U.sel), s = (U.flNew || []).slice();
+    if (s.length < 2) { U.flErr = 'Choisis au moins deux joueurs.'; return render(); }
+    const placed = flPlaced(ev);
+    if (s.some(k => placed.includes(k))) { U.flErr = 'Un de ces joueurs a déjà un départ.'; return render(); }
+    const f = { p: s }; if (s.length === 4 && U.flFour) f.f = 1;
+    const base = hmToMin(ev.time), n = flOf(ev).length;
+    if (base !== null) f.t = minToHm(base + n * flGap(ev));
+    U.flNew = []; U.flFour = false; U.flErr = ''; render();
+    safe(() => updateDoc(evRef(ev.id), { flights: flOf(ev).concat([f]) }), 'Départ créé');
+  },
+  flDel: i => { const ev = getEv(U.sel); const F = flOf(ev).slice(); F.splice(Number(i), 1);
+    safe(() => updateDoc(evRef(ev.id), { flights: F }), 'Départ supprimé'); },
+  flFour: i => { const ev = getEv(U.sel); const F = flOf(ev).map(x => Object.assign({}, x));
+    const f = F[Number(i)]; if (!f) return; if (f.f) delete f.f; else f.f = 1;
+    safe(() => updateDoc(evRef(ev.id), { flights: F })); },
+  flUp: v => A.flSwap(v, -1),
+  flDown: v => A.flSwap(v, 1),
+  flSwap: (v, d) => {
+    const [i, j] = String(v).split(':').map(Number);
+    const ev = getEv(U.sel), F = flOf(ev).map(x => Object.assign({}, x, { p: (x.p || []).slice() }));
+    const p = F[i] && F[i].p; if (!p) return;
+    const k = j + d; if (k < 0 || k >= p.length) return;
+    [p[j], p[k]] = [p[k], p[j]];
+    safe(() => updateDoc(evRef(ev.id), { flights: F }));
+  },
+  flRetime: () => { const ev = getEv(U.sel);
+    safe(() => updateDoc(evRef(ev.id), { flights: flRetime(ev, flOf(ev)) }), 'Heures recalculées'); },
   openAddParty: () => { U.addParty = true; U.npA1 = U.npA2 = U.npB = U.npB2 = ''; U.npFour = false; U.partyErr = ''; render(); },
   closeAddParty: () => { U.addParty = false; render(); },
   npFour: v => { U.npFour = v === '1'; render(); },
@@ -2573,6 +2723,7 @@ function setField(el) {
     g[i] = el.value; U.f.guests = g.filter(Boolean);
   }
   else if (f === 'shareInApp') U.shareInApp = el.checked;
+  else if (f === 'flFour') { U.flFour = el.checked; render(); return; }
   else if (f.startsWith('tiDate.')) {
     const [, k, side] = f.split('.');
     U.tiDates = U.tiDates || {};
@@ -2588,6 +2739,22 @@ root.addEventListener('change', e => {
     const k = el.dataset.score, v = el.value.trim();
     if (has(v) && (isNaN(Number(v)) || Number(v) < 0 || Number(v) > 60)) { toast('Score Stableford entre 0 et 60.'); return; }
     safe(() => updateDoc(evRef(U.sel), { ['scores.' + k]: has(v) ? v : deleteField() }));
+    return;
+  }
+  /* heure d'un depart, modifiee a la main */
+  if (el.dataset.ft !== undefined) {
+    const ev = getEv(U.sel); if (!ev) return;
+    const i = Number(el.dataset.ft), F = flOf(ev).map(x => Object.assign({}, x));
+    if (!F[i]) return;
+    const v = String(el.value || '');
+    if (v && hmToMin(v) === null) { toast('Heure invalide.'); return; }
+    if (v) F[i].t = v; else delete F[i].t;
+    safe(() => updateDoc(evRef(ev.id), { flights: F }));
+    return;
+  }
+  if (el.dataset.f === 'flGap') {
+    const ev = getEv(U.sel); if (!ev) return;
+    safe(() => updateDoc(evRef(ev.id), { gap: Number(el.value) || FL_GAP }), 'Intervalle enregistré');
     return;
   }
   if (el.dataset.f === 'capMax') {
