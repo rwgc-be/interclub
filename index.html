@@ -168,7 +168,7 @@ const firebaseConfig = {
 };
 // Administrateurs (création des équipes et des capitaines). Même liste que dans firestore.rules.
 const ADMINS = ["francisberlier@gmail.com"];
-const VERSION = "v8.8";   // a incrementer a chaque publication
+const VERSION = "v8.9";   // a incrementer a chaque publication
 /* ========================================================= */
 
 const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -612,7 +612,7 @@ root.addEventListener('focusout', () => setTimeout(() => { if (S.pending && !isT
 
 function render() {
   const sc = document.getElementById('scroll');
-  const key = [U.tab, U.view, U.sel, U.selPlayer, U.statTab, U.agFilter, S.teamId].join('|');
+  const key = [U.tab, U.view, U.sel, U.selPlayer, U.statTab, U.mpTab, U.agFilter, S.teamId].join('|');
   const keep = sc && key === lastViewKey ? sc.scrollTop : null;
   root.innerHTML = viewSafe();
   applyDecor();
@@ -1898,8 +1898,31 @@ function vStats() {
   let html = vHeader('Statistiques') + `<div class="scroll" id="scroll"><div class="tabs" style="grid-template-columns:repeat(4,1fr)">
   ${[['mp', 'Match play'], ['score', 'Stableford'], ['sk', 'Approche'], ['put', 'Putting'], ['pres', 'Présences']].map(([k, l]) => `<button class="tab ${U.statTab === k ? 'on' : ''}" data-a="statTab" data-v="${k}" style="font-size:11px">${l}</button>`).join('')}</div>`;
   if (U.statTab === 'mp') {
-    const rows = rankRows(M.filter(p => St[p.k].mp.length).map(p => { const x = St[p.k]; return { k: p.k, name: p.name, pts: x.pts, sub: 'Simple ' + rec(x.mpS) + ' · Foursome ' + rec(x.mpF) + (x.pb.rounds ? ' · ' + pbText(x.pb) : ''), value: fmtPts(x.pts) }; }), (a, b) => b.pts - a.pts);
-    html += `<div class="small">Simple et foursome · victoire 1 pt, partagé ½ · V-N-D = victoires, nuls, défaites. Touche un joueur pour voir sa fiche.</div><div class="list">${rows.map(r => row(r, 'openPlayer')).join('') || '<div class="li small">Aucun match play saisi.</div>'}</div>`;
+    /* Trois classements : tous les matchs, les simples seuls, les doubles
+       seuls. Meme bareme partout : victoire 1 pt, partage un demi. */
+    const sub = U.mpTab === 'single' || U.mpTab === 'four' ? U.mpTab : 'all';
+    const ptsOf = r => r.w + r.h / 2;
+    const nOf = r => r.w + r.h + r.l;
+    html += `<div class="tabs" style="grid-template-columns:repeat(3,1fr)">
+      ${[['all', 'Tous les matchs'], ['single', 'Simple'], ['four', 'Double']].map(([k, l]) =>
+        `<button class="tab ${sub === k ? 'on' : ''}" data-a="mpTab" data-v="${k}" style="font-size:11px">${l}</button>`).join('')}</div>`;
+    let rows, intro, vide;
+    if (sub === 'all') {
+      intro = 'Simples et doubles réunis · victoire 1 pt, partagé ½ · V-N-D = victoires, nuls, défaites.';
+      vide = 'Aucun match play saisi.';
+      rows = rankRows(M.filter(p => St[p.k].mp.length).map(p => { const x = St[p.k];
+        return { k: p.k, name: p.name, pts: x.pts, sub: 'Simple ' + rec(x.mpS) + ' · Double ' + rec(x.mpF) + (x.pb.rounds ? ' · ' + pbText(x.pb) : ''), value: fmtPts(x.pts) };
+      }), (a, b) => b.pts - a.pts);
+    } else {
+      const four = sub === 'four', get = x => four ? x.mpF : x.mpS;
+      intro = (four ? 'Foursomes seuls' : 'Matchs en simple seuls') + ' · victoire 1 pt, partagé ½.';
+      vide = four ? 'Aucun foursome saisi.' : 'Aucun match en simple saisi.';
+      rows = rankRows(M.filter(p => nOf(get(St[p.k]))).map(p => { const r = get(St[p.k]), n = nOf(r);
+        return { k: p.k, name: p.name, pts: ptsOf(r), sub: rec(r) + ' · ' + n + (n > 1 ? ' matchs' : ' match'), value: fmtPts(ptsOf(r)) };
+      }), (a, b) => b.pts - a.pts);
+    }
+    html += `<div class="small">${intro} Touche un joueur pour voir sa fiche.</div>
+    <div class="list">${rows.map(r => row(r, 'openPlayer')).join('') || '<div class="li small">' + vide + '</div>'}</div>`;
   } else if (U.statTab === 'score') {
     [['stab18', 'Stableford 18 trous'], ['stab9', 'Stableford 9 trous']].forEach(([k, t]) => {
       const rows = rankRows(M.filter(p => St[p.k][k].length).map(p => { const a = St[p.k][k], m = avg(a); return { k: p.k, name: p.name, m, sub: a.length + (a.length > 1 ? ' parties' : ' partie') + ' · meilleur ' + Math.max(...a), value: fmtN(m) }; }), (a, b) => b.m - a.m);
@@ -2458,6 +2481,7 @@ const A = {
   },
   /* stats */
   statTab: v => { U.statTab = v; render(); },
+  mpTab: v => { U.mpTab = v; render(); },
   openPlayer: k => { U.view = 'player'; U.selPlayer = k; render(); },
   openMatches: k => { U.view = 'matches'; U.selPlayer = k; U.mFilter = 'all'; U.prevView = 'list'; render(); },
   ficheMatches: v => { const [k, f] = v.split(':'); U.prevView = U.view === 'player' ? 'player' : 'list'; U.view = 'matches'; U.selPlayer = k; U.mFilter = f; render(); },
