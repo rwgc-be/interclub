@@ -168,7 +168,7 @@ const firebaseConfig = {
 };
 // Administrateurs (création des équipes et des capitaines). Même liste que dans firestore.rules.
 const ADMINS = ["francisberlier@gmail.com"];
-const VERSION = "v8.7";   // a incrementer a chaque publication
+const VERSION = "v8.8";   // a incrementer a chaque publication
 /* ========================================================= */
 
 const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -1195,6 +1195,44 @@ function flMatches(f) {
   return [];
 }
 const flVs = m => m.a.map(nameOf).join(' & ') + ' contre ' + m.b.map(nameOf).join(' & ');
+/* Les departs produisent les parties, qui restent le seul endroit ou vivent
+   les resultats et d'ou les statistiques sont calculees. Un resultat deja
+   saisi pour la meme paire est conserve, meme si les cotes ont ete inverses. */
+const sameSide = (x, y) => Array.isArray(x) && Array.isArray(y) && x.length === y.length && x.every(k => y.includes(k));
+const invOut = o => o === 'win' ? 'loss' : o === 'loss' ? 'win' : o;
+function flFind(ev, m) {
+  const P = ev.parties || [];
+  for (let i = 0; i < P.length; i++) if (sameSide(P[i].a, m.a) && sameSide(P[i].b, m.b)) return i;
+  for (let i = 0; i < P.length; i++) if (sameSide(P[i].a, m.b) && sameSide(P[i].b, m.a)) return i;
+  return -1;
+}
+function flSync(ev, flights) {
+  const old = (ev.parties || []).slice(), taken = [], out = [];
+  (flights || []).forEach(f => {
+    const four = ((f.p || []).length === 4 && !!f.f);
+    flMatches(f).forEach(m => {
+      let p = null;
+      for (let i = 0; i < old.length && !p; i++) {
+        if (taken.includes(i)) continue;
+        const o = old[i], same = sameSide(o.a, m.a) && sameSide(o.b, m.b), flip = sameSide(o.a, m.b) && sameSide(o.b, m.a);
+        if (!same && !flip) continue;
+        taken.push(i); p = { a: m.a.slice(), b: m.b.slice(), four, fl: 1 };
+        if (o.outcome) { p.outcome = flip ? invOut(o.outcome) : o.outcome; p.margin = o.margin || ''; }
+      }
+      out.push(p || { a: m.a.slice(), b: m.b.slice(), four, fl: 1 });
+    });
+  });
+  /* Une partie issue d'un depart (fl) qui ne correspond plus a aucun match est
+     un appariement perime : on la retire, sinon elle compterait en double dans
+     les statistiques. Les parties composees a la main sont conservees. */
+  old.forEach((o, i) => { if (!taken.includes(i) && !o.fl) out.push(o); });
+  return out;
+}
+const flSame = (A, B) => A.length === B.length && A.every((p, i) =>
+  sameSide(p.a, B[i].a) && sameSide(p.b, B[i].b) && !!p.four === !!B[i].four);
+const flOutText = p => !p || !p.outcome ? 'Résultat à saisir'
+  : p.outcome === 'half' ? 'Partagé (AS)'
+  : (p.outcome === 'win' ? names(p.a) : names(p.b)) + ' gagne' + (p.margin ? ' · ' + p.margin : '');
 const flFormat = f => { const n = ((f && f.p) || []).length;
   return n === 4 && f.f ? 'Foursome' : n === 3 ? '3 matchs croisés' : n === 4 ? '2 simples' : n === 2 ? 'Simple' : 'Incomplet'; };
 /* Heures recalculees depuis l'heure de l'evenement, par pas de gap. */
@@ -1238,7 +1276,15 @@ function vFlights(ev) {
       <div class="grow t14" style="font-weight:600">${esc(nameOf(k))}${k === mk ? ' (toi)' : ''}</div>
       ${cap ? `<button class="pill click" data-a="flUp" data-v="${i}:${j}" ${j === 0 ? 'disabled style="opacity:.35"' : ''} aria-label="Monter">↑</button>
         <button class="pill click" data-a="flDown" data-v="${i}:${j}" ${j === (f.p || []).length - 1 ? 'disabled style="opacity:.35"' : ''} style="margin-left:4px" aria-label="Descendre">↓</button>` : ''}</div>`).join('')}</div>
-    ${ms.length ? `<div style="display:flex;flex-direction:column;gap:2px">${ms.map(m => `<div class="t14" style="font-weight:600">${esc(flVs(m))}</div>`).join('')}</div>`
+    ${ms.length ? `<div style="display:flex;flex-direction:column;gap:8px">${ms.map(m => {
+      const pi = flFind(ev, m), pt = pi >= 0 ? (ev.parties || [])[pi] : null;
+      const cls = !pt || !pt.outcome ? 'none' : pt.outcome === 'win' ? 'win' : pt.outcome === 'loss' ? 'loss' : '';
+      const canRes = cap || m.a.concat(m.b).includes(mk);
+      return `<div style="display:flex;flex-direction:column;gap:4px">
+        <div class="t14" style="font-weight:600">${esc(flVs(m))}</div>
+        <div class="toprow" style="flex-wrap:wrap;gap:6px"><span class="pill ${cls}" style="max-width:100%">${esc(flOutText(pt))}</span>
+        ${canRes && pi >= 0 ? `<button class="edit" style="margin-left:auto" data-a="flScore" data-v="${pi}">${pt && pt.outcome ? 'Modifier' : 'Saisir'}</button>` : ''}</div></div>`;
+    }).join('')}</div>`
       : '<div class="small" style="color:var(--red)">Il faut 2, 3 ou 4 joueurs.</div>'}
     ${cap ? `<div class="flex">${(f.p || []).length === 4 ? `<button class="btn" data-a="flFour" data-v="${i}">${f.f ? 'Passer en 2 simples' : 'Passer en foursome'}</button>` : ''}
       <button class="btn danger" data-a="flDel" data-v="${i}">Supprimer</button></div>` : ''}</div>`;
@@ -1451,7 +1497,7 @@ function vResults(ev) {
         ${cap ? `<button class="mini" data-a="move" data-v="${i}:-1" aria-label="Monter">${ICON.up}</button><button class="mini" data-a="move" data-v="${i}:1" aria-label="Descendre">${ICON.down}</button>` : ''}</div>` : ''}
       <div class="vs"><div class="t14" style="font-size:13px">${esc(aT)}</div><div class="small" style="font-weight:800">VS</div><div class="t14" style="font-size:13px;text-align:right">${esc(bT)}</div></div>
       <div class="toprow" style="flex-wrap:wrap"><span class="pill ${cls}" style="max-width:100%">${esc(txt)}</span>
-      ${canRes || inParty(pt) ? `<span style="display:flex;gap:6px;margin-left:auto">${cap && !ev.free ? `<button class="edit" style="color:var(--red)" data-a="delParty" data-v="${i}" aria-label="Retirer cette partie">Retirer</button>` : ''}<button class="edit" data-a="editParty" data-v="${i}">${pt.outcome ? 'Modifier' : 'Saisir'}</button></span>` : ''}</div></div>`;
+      ${canRes || inParty(pt) ? `<span style="display:flex;gap:6px;margin-left:auto">${cap && !ev.free && !pt.fl ? `<button class="edit" style="color:var(--red)" data-a="delParty" data-v="${i}" aria-label="Retirer cette partie">Retirer</button>` : ''}<button class="edit" data-a="editParty" data-v="${i}">${pt.outcome ? 'Modifier' : 'Saisir'}</button></span>` : ''}</div></div>`;
     }).join('');
     const ep = has(U.pEdit) && P[U.pEdit] ? P[U.pEdit] : null;
     html += `<div class="toprow"><div style="font-size:16px;font-weight:800">${isIC ? 'Ordre de départ' : 'Parties'}</div>
@@ -2318,7 +2364,20 @@ const A = {
     safe(() => updateDoc(evRef(ev.id), { parties: P }), 'Résultat enregistré');
   },
   /* departs (flys) */
-  openFlights: () => { U.view = 'flights'; U.flNew = []; U.flFour = false; U.flErr = ''; render(); },
+  openFlights: () => {
+    U.view = 'flights'; U.flNew = []; U.flFour = false; U.flErr = ''; render();
+    /* Rattrapage des departs composes avant que les parties ne soient liees. */
+    const ev = getEv(U.sel);
+    if (ev && capView() && flOf(ev).length) {
+      const P = flSync(ev, flOf(ev));
+      if (!flSame(P, ev.parties || [])) safe(() => updateDoc(evRef(ev.id), { parties: P }));
+    }
+  },
+  flScore: i => {
+    const ev = getEv(U.sel), p = (ev.parties || [])[Number(i)]; if (!p) return;
+    U.view = 'results'; U.pEdit = Number(i); U.addParty = false;
+    U.pOut = p.outcome || 'win'; U.pMargin = p.margin || '1 up'; render();
+  },
   flPick: k => {
     const s = (U.flNew || []).slice(), i = s.indexOf(k);
     if (i >= 0) s.splice(i, 1);
@@ -2336,13 +2395,14 @@ const A = {
     const base = hmToMin(ev.time), n = flOf(ev).length;
     if (base !== null) f.t = minToHm(base + n * flGap(ev));
     U.flNew = []; U.flFour = false; U.flErr = ''; render();
-    safe(() => updateDoc(evRef(ev.id), { flights: flOf(ev).concat([f]) }), 'Départ créé');
+    const F = flOf(ev).concat([f]);
+    safe(() => updateDoc(evRef(ev.id), { flights: F, parties: flSync(ev, F) }), 'Départ créé');
   },
   flDel: i => { const ev = getEv(U.sel); const F = flOf(ev).slice(); F.splice(Number(i), 1);
-    safe(() => updateDoc(evRef(ev.id), { flights: F }), 'Départ supprimé'); },
+    safe(() => updateDoc(evRef(ev.id), { flights: F, parties: flSync(ev, F) }), 'Départ supprimé'); },
   flFour: i => { const ev = getEv(U.sel); const F = flOf(ev).map(x => Object.assign({}, x));
     const f = F[Number(i)]; if (!f) return; if (f.f) delete f.f; else f.f = 1;
-    safe(() => updateDoc(evRef(ev.id), { flights: F })); },
+    safe(() => updateDoc(evRef(ev.id), { flights: F, parties: flSync(ev, F) })); },
   flUp: v => A.flSwap(v, -1),
   flDown: v => A.flSwap(v, 1),
   flSwap: (v, d) => {
@@ -2351,7 +2411,7 @@ const A = {
     const p = F[i] && F[i].p; if (!p) return;
     const k = j + d; if (k < 0 || k >= p.length) return;
     [p[j], p[k]] = [p[k], p[j]];
-    safe(() => updateDoc(evRef(ev.id), { flights: F }));
+    safe(() => updateDoc(evRef(ev.id), { flights: F, parties: flSync(ev, F) }));
   },
   flRetime: () => { const ev = getEv(U.sel);
     safe(() => updateDoc(evRef(ev.id), { flights: flRetime(ev, flOf(ev)) }), 'Heures recalculées'); },
